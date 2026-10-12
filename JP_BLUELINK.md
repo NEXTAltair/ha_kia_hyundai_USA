@@ -62,8 +62,10 @@ host. Use a private network or an SSH tunnel to the signer. `--host` and
 `--port` can change its listen address; the service has no authentication and
 must remain restricted to trusted hosts.
 
-Each snapshot obtains a fresh Stamp. Device registration is cached until the
-integration restarts. Registration uses the signing headers without account
+Each snapshot obtains a fresh Stamp. The signer reconnects once if its Frida
+agent is unloaded; other signing failures return HTTP 503 without raw errors.
+The app PID and Frida port forward must remain valid. Device registration is
+cached until the integration restarts. Registration uses the signing headers without account
 Authorization; status requests add the account Bearer token, device ID and
 CCS2 protocol header. Account headers and cookies are never sent to the
 Stamp provider.

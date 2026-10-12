@@ -11,6 +11,7 @@ credentials are read. The server binds to localhost unless --host is set.
 """
 
 import argparse
+from contextlib import suppress
 import json
 import logging
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -56,6 +57,46 @@ rpc.exports.generate = function () {
 """
 
 
+class Signer:
+    """Keep the signing session alive and reconnect after an agent unload."""
+
+    def __init__(self, address: str, pid: int):
+        self.address = address
+        self.pid = pid
+        self.session = None
+        self.script = None
+
+    def connect(self):
+        device = frida.get_device_manager().add_remote_device(self.address)
+        self.session = device.attach(self.pid)
+        bridge = Path(frida_tools.__file__).parent / "bridges" / "java.js"
+        self.script = self.session.create_script(
+            bridge.read_text(encoding="utf-8") + "\n" + _AGENT
+        )
+        self.script.load()
+
+    def close(self):
+        if self.script is not None:
+            with suppress(frida.InvalidOperationError, frida.TransportError):
+                self.script.unload()
+            self.script = None
+        if self.session is not None:
+            with suppress(frida.InvalidOperationError, frida.TransportError):
+                self.session.detach()
+            self.session = None
+
+    def generate(self):
+        for attempt in range(2):
+            try:
+                if self.script is None:
+                    self.connect()
+                return self.script.exports_sync.generate()
+            except (frida.InvalidOperationError, frida.TransportError):
+                self.close()
+                if attempt:
+                    raise
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -67,11 +108,7 @@ def main() -> None:
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO)
 
-    device = frida.get_device_manager().add_remote_device(args.frida_address)
-    session = device.attach(args.pid)
-    bridge = Path(frida_tools.__file__).parent / "bridges" / "java.js"
-    script = session.create_script(bridge.read_text(encoding="utf-8") + "\n" + _AGENT)
-    script.load()
+    signer = Signer(args.frida_address, args.pid)
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
@@ -79,9 +116,9 @@ def main() -> None:
                 self.send_error(404)
                 return
             try:
-                result = script.exports_sync.generate()
+                result = signer.generate()
                 body = json.dumps(result).encode("utf-8")
-            except (frida.Error, frida.core.RPCException):
+            except Exception:  # noqa: BLE001
                 # Do not include Frida messages or application data in errors.
                 self.send_error(503, "Official app signer unavailable")
                 return
@@ -103,8 +140,7 @@ def main() -> None:
     except KeyboardInterrupt:
         pass
     finally:
-        script.unload()
-        session.detach()
+        signer.close()
 
 
 if __name__ == "__main__":
