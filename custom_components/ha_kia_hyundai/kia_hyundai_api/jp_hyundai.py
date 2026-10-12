@@ -400,14 +400,31 @@ class JpHyundai:
         if not await self._ensure_device_registered():
             return {}
 
-        response = await self.api_session.get(
+        # E-GMP vehicles (IONIQ 5/6 etc.) are "CCS2" and expose status at a
+        # different path than the legacy CCS fleet. The car-list response is
+        # too minimal to tell them apart reliably, so try the CCS2 cached-
+        # status path first and fall back to the legacy path only on 404
+        # (a wrong-generation path). Any other status (e.g. 403) is a real
+        # failure, not a path mismatch, so we stop and return {}.
+        # Endpoint paths were read out of the app dex; the IONIQ 5 is CCS2.
+        status_urls = (
+            JP_HYUNDAI_SPA_API_URL + f"vehicles/{vehicle_id}/ccs2/carstatus/latest",
             JP_HYUNDAI_SPA_API_URL_V2 + f"vehicles/{vehicle_id}/status",
-            headers=self._spa_headers(self.resolved_app_id, self.spa_device_id),
         )
-        if response.status not in range(200, 304):
+        response = None
+        for url in status_urls:
+            response = await self.api_session.get(
+                url,
+                headers=self._spa_headers(self.resolved_app_id, self.spa_device_id),
+            )
+            if response.status == 404:
+                _LOGGER.debug("JP status path 404, trying fallback: %s", url)
+                continue
+            break
+        if response is None or response.status not in range(200, 304):
             _LOGGER.warning(
                 "JP Hyundai vehicle status request failed (%s); returning empty "
-                "status.", response.status
+                "status.", None if response is None else response.status
             )
             return {}
         body = await response.json()
@@ -438,15 +455,31 @@ class JpHyundai:
             raise NotImplementedError(_JP_CONTROL_UNSUPPORTED)
         if not await self._ensure_device_registered():
             raise NotImplementedError(_JP_CONTROL_UNSUPPORTED)
+        # Like status, CCS2 (IONIQ 5/6) and legacy fleets use different door
+        # endpoints. Try the CCS2 path first, fall back to legacy on 404.
+        # The exact CCS2 command payload is unverified (no live capture yet);
+        # a wrong payload surfaces as a non-404 error with the body, never a
+        # physical action, so this is safe to attempt.
         payload = {"action": action, "deviceId": self.spa_device_id}
-        resp = await self.api_session.post(
+        control_urls = (
+            JP_HYUNDAI_SPA_API_URL_V2 + f"vehicles/{vehicle_id}/ccs2/control/door",
             JP_HYUNDAI_SPA_API_URL_V2 + f"vehicles/{vehicle_id}/control/door",
-            json=payload,
-            headers=self._spa_headers(self.resolved_app_id, self.spa_device_id),
         )
-        if resp.status not in range(200, 304):
-            body = await resp.text()
-            raise AuthError(f"JP door control failed ({resp.status}): {body[:200]}")
+        resp = None
+        for url in control_urls:
+            resp = await self.api_session.post(
+                url,
+                json=payload,
+                headers=self._spa_headers(self.resolved_app_id, self.spa_device_id),
+            )
+            if resp.status == 404:
+                _LOGGER.debug("JP door path 404, trying fallback: %s", url)
+                continue
+            break
+        if resp is None or resp.status not in range(200, 304):
+            body = "" if resp is None else await resp.text()
+            status = None if resp is None else resp.status
+            raise AuthError(f"JP door control failed ({status}): {body[:200]}")
         return await resp.json()
 
     async def lock(self, vehicle_id: str):
