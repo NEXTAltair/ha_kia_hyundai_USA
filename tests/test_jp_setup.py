@@ -97,6 +97,18 @@ async def test_jp_flow_entities_and_stamp_options(hass, ccs2_body, with_stamp):
             "73" if with_stamp else "unavailable"
         )
         assert not any(
+            entity.unique_id.endswith("-fuel_remaining_range_value")
+            for entity in entities
+        )
+        for key in ("ev_remaining_range_value", "total_remaining_range_value"):
+            range_entity = next(
+                entity for entity in entities if entity.unique_id.endswith(f"-{key}")
+            )
+            # HA's default metric display converts the normalized 200 miles.
+            assert hass.states.get(range_entity.entity_id).state == (
+                "322" if with_stamp else "unavailable"
+            )
+        assert not any(
             entity.domain in ("switch", "number", "button", "lock", "climate")
             for entity in entities
         )

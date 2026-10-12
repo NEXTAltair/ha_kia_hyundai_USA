@@ -125,6 +125,7 @@ SENSOR_DESCRIPTIONS: Final[tuple[KiaSensorEntityDescription, ...]] = (
         native_unit_of_measurement=UnitOfLength.MILES,
         state_class=SensorStateClass.MEASUREMENT,
         preserve_state=True,
+        exists_fn=lambda c: (not c.is_ev) or c.is_phev,
     ),
     KiaSensorEntityDescription(
         key="total_remaining_range_value",
