@@ -35,6 +35,7 @@ from .const import (
     CONF_BRAND,
     CONF_CLIENT_SECRET,
     CONF_CFB,
+    CONF_STAMP_URL,
     CONF_DEVICE_ID,
     CONF_PIN,
     CONF_REFRESH_TOKEN,
@@ -135,6 +136,7 @@ async def _get_or_create_api_connection(
     pin: str | None = None,
     client_secret: str | None = None,
     cfb: str | None = None,
+    stamp_url: str | None = None,
 ) -> UsKia | UsHyundai | UsGenesis | JpHyundai:
     """Get or create a shared API connection for all vehicles.
 
@@ -236,6 +238,7 @@ async def _get_or_create_api_connection(
                 pin=pin,
                 client_session=client_session,
                 cfb=cfb,
+                stamp_url=stamp_url,
             )
 
             _LOGGER.debug("Logging in to Hyundai Japan Bluelink API...")
@@ -270,6 +273,7 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry):
     pin = config_entry.data.get(CONF_PIN)
     client_secret = config_entry.data.get(CONF_CLIENT_SECRET)
     cfb = config_entry.data.get(CONF_CFB) or None
+    stamp_url = config_entry.options.get(CONF_STAMP_URL, config_entry.data.get(CONF_STAMP_URL)) or None
     vehicles_config = config_entry.data.get(CONF_VEHICLES, [])
 
     scan_interval = timedelta(
@@ -293,6 +297,7 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry):
             pin=pin,
             client_secret=client_secret,
             cfb=cfb,
+            stamp_url=stamp_url,
         )
 
         if api_connection.vehicles is None:
@@ -410,6 +415,7 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry):
 
         # Set up services (not async, don't await)
         async_setup_services(hass)
+        config_entry.async_on_unload(config_entry.add_update_listener(async_update_options))
 
         return True
 
@@ -422,6 +428,11 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry):
     except Exception as err:
         _LOGGER.exception("Error setting up integration: %s", err)
         raise ConfigEntryError(f"Error setting up integration: {err}") from err
+
+
+async def async_update_options(hass: HomeAssistant, config_entry: ConfigEntry) -> None:
+    """Apply polling and Stamp-service settings by reloading the entry."""
+    await hass.config_entries.async_reload(config_entry.entry_id)
 
 
 async def async_unload_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:

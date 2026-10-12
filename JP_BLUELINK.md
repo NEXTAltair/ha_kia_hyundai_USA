@@ -1,62 +1,129 @@
-# Hyundai (Japan) / Bluelink JP brand
+# Hyundai (Japan) / Bluelink JP
 
-This fork adds a **Hyundai (Japan)** brand to the integration, targeting the
-Hyundai Mobility Japan Connected Car Services backend
-(`ccs-apigw.hyundaijapan.com`). It is additive: the existing US
-Kia/Hyundai/Genesis paths are untouched.
+This fork supports login and vehicle discovery on Hyundai Mobility Japan's
+Connected Car Services backend (`ccs-apigw.hyundaijapan.com`). Cached vehicle
+status can now use a **local Stamp service** backed by the user's installed
+official Android app.
+
+Live validation and the current JP work scope are limited to **IONIQ 5 EV**.
+Other models, including ICE, HEV and PHEV vehicles, are unverified and outside
+the current scope. Shared protocol fixtures do not establish live support for
+those vehicles.
+
+## Verification status
+
+- OAuth login and `/api/v1/user/cars`: verified with a real JP account.
+- Native Stamp generation and `/api/v1/spa/notifications/register`: verified
+  against the real JP backend with official Android Bluelink **1.0.17**
+  (version code 10260), including registration through this integration.
+  The response was HTTP 200, `retCode: S`, `resCode: 0000`.
+- CCS2 cached status: verified with a real JP IONIQ 5 on 2026-10-12 using
+  `scripts/jp_status_probe.py`. The integration retrieved battery SOC,
+  location, door/charging state and odometer through the native Stamp service.
+  JP timestamps include fractional seconds (`YYYYMMDDHHmmss.SSS`).
+- CCS2 and legacy parsing and Home Assistant entities: tested with synthetic
+  fixtures in Home Assistant 2025.1.4. Legacy status and display in the user's
+  running Home Assistant instance have not been verified with a live car.
+- Remote commands: unverified; JP wake, charging and charge-limit controls
+  are not offered in Home Assistant.
+
+No application binary, OAuth secret, or signing key is shipped in this repo.
 
 ## Install
 
-Via HACS as a custom repository:
+Use this fork as a HACS custom repository, or copy
+`custom_components/ha_kia_hyundai/` into your Home Assistant configuration and
+restart. Add the integration, select **Hyundai (Japan)**, and enter your
+Bluelink email, password and OAuth client secret.
 
-1. HACS -> three-dot menu -> Custom repositories
-2. Repository: `https://github.com/NEXTAltair/ha_kia_hyundai_USA`, category
-   **Integration** -> Add
-3. Install "Kia/Hyundai/Genesis (USA)" and restart Home Assistant
+Existing identity-only entries can keep their credentials. Configure the
+Stamp service URL under the integration's **Options**; saving reloads the
+entry. The optional CFB field is retained for older signing schemes and is
+not the signing method verified with app 1.0.17.
 
-Or copy `custom_components/ha_kia_hyundai/` into `<config>/custom_components/`
-and restart.
+## Local Stamp service
 
-Then: Settings -> Devices & Services -> Add Integration -> pick brand
-**Hyundai (Japan)** and enter your account email, password, and the app's
-OAuth client secret. (PIN and a "CFB" field are optional; see Limitations.)
+The service calls the installed official app's native signing function for
+each request. It does not read account passwords or export the signing key.
+It requires the official app to remain open in a compatible Android test
+emulator/device with a matching Frida server already running. This is an
+experimental development setup; it is not a self-contained HACS installation.
+The obfuscated app field used by the adapter can change in other versions.
 
-## What works today
+Forward the Frida port and determine the running app's PID:
 
-- **Login** against the real JP backend (OAuth2 authorize -> signin ->
-  token), verified live.
-- **Vehicle list** (`GET /api/v1/user/cars`) -> your vehicle is created as a
-  Home Assistant device (e.g. an IONIQ 5).
-- The device and its entities register and the integration loads cleanly.
+```bash
+adb -s emulator-5584 forward tcp:27042 tcp:27042
+adb -s emulator-5584 shell pidof com.hyundai.bluelink.jp
+```
 
-## Limitations (live status and remote control)
+Start the service using the returned PID (replace `1234`):
 
-Live vehicle status and remote control use the backend's `/spa/` and `/ccs2/`
-endpoints, which the gateway only accepts with a valid per-request `Stamp`
-header. In current JP app versions that `Stamp` is produced by white-box
-cryptography inside the app's native library, so this integration cannot
-generate it on its own. Without a valid `Stamp` the gateway returns
-`403 Access to this API has been disallowed`, and status-derived entities stay
-unavailable.
+```bash
+uv run scripts/jp_stamp_server.py --pid 1234
+```
 
-This is the same class of problem the wider community hits: mature projects
-(bluelinky, hyundai_kia_connect_api) do not generate these stamps locally
-either; for the EU region they rely on externally pre-generated stamps. No
-such source exists for Japan, and the CCS2 protocol used by E-GMP cars
-(IONIQ 5/6) is still largely unimplemented across these projects.
+It listens at `http://127.0.0.1:8765/stamp` by default and returns
+`{"app_id": "...", "stamp": "..."}` with `Cache-Control: no-store`.
+Configure this URL in the integration. It must be reachable **from Home
+Assistant**: localhost inside a container or another machine is a different
+host. Use a private network or an SSH tunnel to the signer. `--host` and
+`--port` can change its listen address; the service has no authentication and
+must remain restricted to trusted hosts.
 
-Practical consequence: out of the box, the JP brand provides **login +
-vehicle presence**, not live telematics. The optional "CFB" config field
-reflects an older signing scheme and does not enable live data on current app
-versions.
+Each snapshot obtains a fresh Stamp. The signer reconnects once if its Frida
+agent is unloaded; other signing failures return HTTP 503 without raw errors.
+The app PID and Frida port forward must remain valid. Device registration is
+cached until restart or a backend rejection (`resCode: 4002`). A rejected
+device registration is discarded and status is retried once after registration.
+A second rejection returns an API error and leaves the cache empty so the next
+scheduled refresh can register again. Registration uses the signing headers
+without account Authorization; status requests add the account Bearer token,
+device ID and CCS2 protocol header. Account headers and cookies are never
+sent to the Stamp provider.
 
-## Status
+## Read-only real-vehicle probe
 
-- Core: login + vehicle device in Home Assistant — working, verified against a
-  real account.
-- Live status/control — blocked by the white-box `Stamp` requirement described
-  above.
+With the Stamp service running, run:
 
-No application secrets are shipped in this repository; the OAuth client secret
-(and any optional values) are supplied locally by the user via the config
-entry and are never committed to source.
+```bash
+uv run scripts/jp_status_probe.py
+```
+
+It prompts locally for the email, password and client secret, logs in, and
+reads **cached** status for the account's vehicles. It does not wake the car
+or send control commands. Credentials are not saved. The terminal prints
+only fetch status codes, and `/tmp/jp-status.redacted.json` contains redacted
+raw/normalized response data to check the JP schema. Inspect the file before
+sharing it, since unexpected backend fields may carry additional information.
+`--stamp-url` and `--output` override these defaults.
+
+## Vehicle state and diagnostics
+
+- CCS2 `/api/v1/spa/vehicles/{id}/ccs2/carstatus/latest` is tried first.
+- Only HTTP 404 triggers the legacy `/api/v1/spa/vehicles/{id}/status/latest`
+  fallback. Authentication errors are not treated as a different protocol.
+- Battery SOC, charging, door/hood/trunk state, range, odometer, location and
+  timestamps are mapped to the existing coordinator. Unknown values remain
+  unknown; unreported distance units are not assumed. JP kilometer readings
+  are converted before being exposed by the existing mile-based sensors.
+- EV metadata from the vehicle list prepares the EV battery/range sensors
+  even before authenticated telemetry is available.
+- Downloaded diagnostics distinguish `stamp_not_configured`,
+  `stamp_provider_unavailable`, `device_registration_failed`,
+  `gateway_rejected`, `api_error`, `unsupported_response` and `ok`.
+  Credentials, entry titles containing emails, and coordinates are redacted.
+
+## Tests
+
+Use Python 3.12:
+
+```bash
+python3 -m pip install -r requirements-test.txt
+python3 -m pytest -q
+python3 -m ruff check .
+```
+
+The test runtime is pinned to Home Assistant 2025.1.4. Protocol tests use a
+localhost mock server; runtime tests drive configuration, EV entities,
+diagnostics, Options reload and unloading. They do not contact a live car.

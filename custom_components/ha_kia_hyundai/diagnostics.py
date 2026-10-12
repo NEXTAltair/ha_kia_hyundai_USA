@@ -8,12 +8,25 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 
 from . import get_all_coordinators
-from .const import DOMAIN
+from .const import DOMAIN, CONF_CLIENT_SECRET, CONF_CFB, CONF_PIN, CONF_REFRESH_TOKEN, CONF_STAMP_URL
 
-TO_REDACT = {CONF_USERNAME, CONF_PASSWORD, CONF_UNIQUE_ID, "vehicle_identifier"}
+TO_REDACT = {
+    CONF_USERNAME, CONF_PASSWORD, CONF_UNIQUE_ID, "vehicle_identifier",
+    CONF_CLIENT_SECRET, CONF_CFB, CONF_PIN, CONF_REFRESH_TOKEN,
+    CONF_STAMP_URL,
+    "vin", "VIN", "key", "device_id", "id", "title",
+}
 TO_REDACT_MAPPED = {
     "identifier",
     "vin",
+    "VIN",
+    "carId",
+    "vehicleId",
+    "deviceId",
+    "access_token",
+    "refresh_token",
+    "controlToken",
+    "Stamp",
     "key",
     "latitude",
     "longitude",
@@ -29,8 +42,18 @@ TO_REDACT_RAW = {
     "preferredDealer",
     "lat",
     "lon",
+    "latitude",
+    "longitude",
+    "Latitude",
+    "Longitude",
+    "GeoCoord",
     "invDealerCode",
-}
+    "email",
+    "accessToken",
+    "refreshToken",
+    "token",
+    "Authorization",
+} | TO_REDACT | TO_REDACT_MAPPED
 TO_REDACT_DEVICE = {"identifiers"}
 TO_REDACT_ENTITIES = {"latitude", "longitude"}
 
@@ -55,6 +78,15 @@ async def async_get_config_entry_diagnostics(
         vehicle_data = {
             "vehicle_raw_response": async_redact_data(coordinator.data, TO_REDACT_RAW),
         }
+        status_diagnostics = getattr(coordinator.api_connection, "status_diagnostics", None)
+        if status_diagnostics is not None:
+            status_diagnostics = coordinator.api_connection.vehicle_status_diagnostics.get(
+                vehicle_id, {"state": "not_requested"}
+            )
+            vehicle_data["status_fetch"] = dict(status_diagnostics)
+            raw = coordinator.api_connection.vehicle_status_responses.get(vehicle_id)
+            if raw is not None:
+                vehicle_data["jp_status_response"] = async_redact_data(raw, TO_REDACT_RAW)
 
         hass_device = device_registry.async_get_device(
             identifiers={(DOMAIN, str(coordinator.vehicle_id))}

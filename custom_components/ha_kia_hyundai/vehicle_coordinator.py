@@ -188,7 +188,29 @@ class VehicleCoordinator(DataUpdateCoordinator):
             self.data,
             "lastVehicleInfo.vehicleStatusRpt.vehicleStatus.evStatus"
         )
-        return ev_status is not None
+        if ev_status is not None:
+            return True
+        # JP vehicle identity is available even when Stamp authentication
+        # prevents telemetry. Prepare EV sensors before the first snapshot.
+        return any(
+            vehicle.get("id") == self.vehicle_id and vehicle.get("is_ev") is True
+            for vehicle in self.api_connection.vehicles or []
+        )
+
+    @property
+    def can_remote_charge(self) -> bool:
+        """Return if the client implements charging commands."""
+        return self.is_ev and not isinstance(self.api_connection, JpHyundai)
+
+    @property
+    def can_set_charge_limits(self) -> bool:
+        """Return if charge-limit commands are implemented."""
+        return not isinstance(self.api_connection, JpHyundai)
+
+    @property
+    def can_wake_vehicle(self) -> bool:
+        """Return if a vehicle wake-up command is implemented."""
+        return not isinstance(self.api_connection, JpHyundai)
 
     @property
     def is_phev(self) -> bool:

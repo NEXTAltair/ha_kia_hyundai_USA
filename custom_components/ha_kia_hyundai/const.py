@@ -18,10 +18,10 @@ CONF_PIN: str = "pin"
 # JP Hyundai Bluelink only: the app's OAuth client secret, supplied by the
 # user (never shipped in source). See kia_hyundai_api/const.py.
 CONF_CLIENT_SECRET: str = "client_secret"
-# JP Hyundai Bluelink only (optional): the app-embedded "CFB" key used to
-# sign the Stamp header. Supplying it enables live status + remote control;
-# leaving it blank keeps the integration at login + vehicle-list only.
+# JP optional legacy signing key. Current apps use the local Stamp service
+# instead; no signing secrets are included in source.
 CONF_CFB: str = "cfb"
+CONF_STAMP_URL: str = "stamp_url"
 
 # Brand constants
 BRAND_KIA: str = "kia"
