@@ -159,6 +159,7 @@ def normalize_status(body: dict, *, is_ev: bool = False) -> dict | None:
             and lon is not None
             and -90 <= lat <= 90
             and -180 <= lon <= 180
+            and (lat != 0 or lon != 0)
         ):
             _put(result, "lastVehicleInfo.location.coord", {"lat": lat, "lon": lon})
         if is_ev:

@@ -40,7 +40,7 @@ def ccs2_body():
                         }
                     },
                     "Body": {"Hood": {"Open": 0}, "Trunk": {"Open": 1}},
-                    "Location": {"GeoCoord": {"Latitude": 0.0, "Longitude": 0.0}},
+                    "Location": {"GeoCoord": {"Latitude": 35.0, "Longitude": 139.0}},
                 }
             }
         },

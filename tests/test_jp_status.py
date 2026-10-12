@@ -18,7 +18,7 @@ def test_ccs2_units_and_state(ccs2_body):
     assert status["doorLock"] is True
     assert status["doorStatus"]["trunk"] is True
     assert status["engine"] is False
-    assert data["lastVehicleInfo"]["location"]["coord"] == {"lat": 0.0, "lon": 0.0}
+    assert data["lastVehicleInfo"]["location"]["coord"] == {"lat": 35.0, "lon": 139.0}
     assert data["vehicleConfig"]["vehicleDetail"]["vehicle"][
         "mileage"
     ] == pytest.approx(10000)
@@ -67,6 +67,19 @@ def test_ccs2_auxiliary_battery_reliability(ccs2_body, reliability):
         assert "batteryStatus" not in status
     else:
         assert status["batteryStatus"]["stateOfCharge"] == 90
+
+
+@pytest.mark.parametrize("lat,lon", [(0.0, 0.0), (0.0, 139.0), (35.0, 0.0)])
+def test_ccs2_zero_location_sentinel(ccs2_body, lat, lon):
+    ccs2_body["resMsg"]["state"]["Vehicle"]["Location"]["GeoCoord"] = {
+        "Latitude": lat,
+        "Longitude": lon,
+    }
+    data = normalize_status(ccs2_body)
+    if lat == 0 and lon == 0:
+        assert "location" not in data["lastVehicleInfo"]
+    else:
+        assert data["lastVehicleInfo"]["location"]["coord"] == {"lat": lat, "lon": lon}
 
 
 def test_legacy_jst_and_distance_units():

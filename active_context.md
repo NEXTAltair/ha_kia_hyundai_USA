@@ -231,7 +231,7 @@ Branch: `issue-1-jp-status`; worktree:
   (`scripts/jp_status_probe.py`), Stamp URL config/Options and reload,
   CCS2/legacy snapshot normalization, JP EV metadata fallback, and diagnostic
   redaction. Unsupported JP charge/limit/wake controls are not offered.
-- Local tests: 22 passed on Home Assistant 2025.1.4 / Python 3.12. Ruff passed.
+- Local tests: 25 passed on Home Assistant 2025.1.4 / Python 3.12. Ruff passed.
   Test-only ThreadedResolver avoids pycares' global shutdown-thread artifact;
   resource cleanup checks remain enabled.
 - User ran `uv run scripts/jp_status_probe.py` with local credentials and got
