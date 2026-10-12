@@ -28,12 +28,14 @@ from homeassistant.core import callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 # Use embedded API libraries
-from .kia_hyundai_api import UsKia, AuthError
+from .kia_hyundai_api import UsKia, AuthError, JpHyundai
 from .kia_hyundai_api.us_hyundai import UsHyundai
 from .kia_hyundai_api.us_genesis import UsGenesis
 
 from .const import (
     CONF_BRAND,
+    CONF_CLIENT_SECRET,
+    CONF_CFB,
     CONF_DEVICE_ID,
     CONF_OTP_CODE,
     CONF_OTP_TYPE,
@@ -47,7 +49,9 @@ from .const import (
     CONFIG_FLOW_TEMP_VEHICLES,
     BRAND_KIA,
     BRAND_HYUNDAI,
+    BRAND_JP_HYUNDAI,
     BRANDS,
+    SELECTABLE_BRANDS,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -120,7 +124,7 @@ class KiaUvoConfigFlowHandler(config_entries.ConfigFlow):
         default_brand = self.data.get(CONF_BRAND, BRAND_KIA)
 
         data_schema = vol.Schema({
-            vol.Required(CONF_BRAND, default=default_brand): vol.In(BRANDS),
+            vol.Required(CONF_BRAND, default=default_brand): vol.In(SELECTABLE_BRANDS),
         })
         errors: dict[str, str] = {}
 
@@ -131,7 +135,9 @@ class KiaUvoConfigFlowHandler(config_entries.ConfigFlow):
             # Route to brand-specific credential step
             if brand == BRAND_KIA:
                 return await self.async_step_kia_credentials()
-            else:  # Hyundai or Genesis
+            elif brand == BRAND_JP_HYUNDAI:
+                return await self.async_step_jp_credentials()
+            else:  # Hyundai or Genesis (USA)
                 return await self.async_step_bluelink_credentials()
 
         return self.async_show_form(
@@ -329,6 +335,83 @@ class KiaUvoConfigFlowHandler(config_entries.ConfigFlow):
             },
         )
 
+    async def async_step_jp_credentials(self, user_input: dict[str, Any] | None = None):
+        """Handle Hyundai Japan (Bluelink) credentials input.
+
+        JP uses email + password for login (headless OAuth2), plus the app's
+        OAuth client secret which the user must supply themselves (it is not
+        shipped in source). An optional remote-control PIN is collected for
+        future use; it is not needed for login or the vehicle list.
+        """
+        default_username = self.data.get(CONF_USERNAME, "")
+
+        data_schema = vol.Schema({
+            vol.Required(CONF_USERNAME, default=default_username): str,
+            vol.Required(CONF_PASSWORD): str,
+            vol.Required(CONF_CLIENT_SECRET): str,
+            vol.Optional(CONF_CFB, default=""): str,
+            vol.Optional(CONF_PIN, default=""): str,
+        })
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            username = user_input[CONF_USERNAME]
+            password = user_input[CONF_PASSWORD]
+            client_secret = user_input[CONF_CLIENT_SECRET]
+            cfb = user_input.get(CONF_CFB) or None
+            pin = user_input.get(CONF_PIN) or None
+
+            unique_id = f"{BRAND_JP_HYUNDAI}_{username.lower()}"
+            if self.source != SOURCE_REAUTH:
+                await self.async_set_unique_id(unique_id)
+                self._abort_if_unique_id_configured()
+
+            try:
+                client_session = async_get_clientsession(self.hass)
+                self.api_connection = JpHyundai(
+                    username=username,
+                    password=password,
+                    client_secret=client_secret,
+                    pin=pin,
+                    client_session=client_session,
+                    cfb=cfb,
+                )
+
+                self.data.update({
+                    CONF_USERNAME: username,
+                    CONF_PASSWORD: password,
+                    CONF_CLIENT_SECRET: client_secret,
+                    CONF_CFB: cfb or "",
+                    CONF_PIN: pin or "",
+                    CONF_BRAND: BRAND_JP_HYUNDAI,
+                })
+
+                _LOGGER.info("Logging in to Hyundai Japan Bluelink...")
+                await self.api_connection.login()
+                await self.api_connection.get_vehicles()
+
+                if not self.api_connection.vehicles:
+                    return self.async_abort(reason="no_vehicles")
+
+                self.data[CONFIG_FLOW_TEMP_VEHICLES] = self.api_connection.vehicles
+                self.data[CONF_DEVICE_ID] = self.api_connection.device_id
+
+                _LOGGER.info("Found %d JP vehicle(s)", len(self.api_connection.vehicles))
+                return await self.async_step_confirm_vehicles()
+
+            except AuthError as e:
+                _LOGGER.error("JP authentication error: %s", e)
+                errors["base"] = "auth"
+            except Exception as e:  # noqa: BLE001
+                _LOGGER.exception("Error during JP login: %s", e)
+                errors["base"] = "auth"
+
+        return self.async_show_form(
+            step_id="jp_credentials",
+            data_schema=data_schema,
+            errors=errors,
+        )
+
     async def async_step_otp_code(self, user_input: dict[str, Any] | None = None):
         """Handle OTP code input step."""
         _LOGGER.debug("OTP code step with input: %s", user_input)
@@ -437,7 +520,7 @@ class KiaUvoConfigFlowHandler(config_entries.ConfigFlow):
 
         vehicles = self.data.get(CONFIG_FLOW_TEMP_VEHICLES, [])
         brand = self.data.get(CONF_BRAND, BRAND_KIA)
-        brand_name = BRANDS.get(brand, "Kia")
+        brand_name = SELECTABLE_BRANDS.get(brand, "Kia")
 
         # Build list of vehicle names for description
         vehicle_list = []
@@ -477,7 +560,11 @@ class KiaUvoConfigFlowHandler(config_entries.ConfigFlow):
             # Add brand-specific fields
             if brand == BRAND_KIA:
                 entry_data[CONF_REFRESH_TOKEN] = self.data.get(CONF_REFRESH_TOKEN)
-            else:  # Hyundai or Genesis
+            elif brand == BRAND_JP_HYUNDAI:
+                entry_data[CONF_CLIENT_SECRET] = self.data.get(CONF_CLIENT_SECRET)
+                entry_data[CONF_CFB] = self.data.get(CONF_CFB, "")
+                entry_data[CONF_PIN] = self.data.get(CONF_PIN)
+            else:  # Hyundai or Genesis (USA)
                 entry_data[CONF_PIN] = self.data.get(CONF_PIN)
 
             # Handle reauth - update existing entry

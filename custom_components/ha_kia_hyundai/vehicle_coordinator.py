@@ -21,7 +21,7 @@ from homeassistant.helpers.update_coordinator import (
     REQUEST_REFRESH_DEFAULT_COOLDOWN,
 )
 
-from .kia_hyundai_api import UsKia
+from .kia_hyundai_api import UsKia, JpHyundai
 from .kia_hyundai_api.us_hyundai import UsHyundai
 from .kia_hyundai_api.us_genesis import UsGenesis
 from .const import (
@@ -36,7 +36,7 @@ from .util import safely_get_json_value, convert_last_updated_str_to_datetime
 _LOGGER = getLogger(__name__)
 
 # Type alias for all supported API clients
-ApiConnection = UsKia | UsHyundai | UsGenesis
+ApiConnection = UsKia | UsHyundai | UsGenesis | JpHyundai
 
 
 class VehicleCoordinator(DataUpdateCoordinator):

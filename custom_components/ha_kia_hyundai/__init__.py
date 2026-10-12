@@ -27,12 +27,14 @@ from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryError
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 # Use embedded API libraries
-from .kia_hyundai_api import UsKia, AuthError
+from .kia_hyundai_api import UsKia, AuthError, JpHyundai
 from .kia_hyundai_api.us_hyundai import UsHyundai
 from .kia_hyundai_api.us_genesis import UsGenesis
 
 from .const import (
     CONF_BRAND,
+    CONF_CLIENT_SECRET,
+    CONF_CFB,
     CONF_DEVICE_ID,
     CONF_PIN,
     CONF_REFRESH_TOKEN,
@@ -45,7 +47,9 @@ from .const import (
     BRAND_KIA,
     BRAND_HYUNDAI,
     BRAND_GENESIS,
+    BRAND_JP_HYUNDAI,
     BRANDS,
+    SELECTABLE_BRANDS,
 )
 from .services import async_setup_services, async_unload_services
 from .vehicle_coordinator import VehicleCoordinator
@@ -129,7 +133,9 @@ async def _get_or_create_api_connection(
     device_id: str | None,
     refresh_token: str | None = None,
     pin: str | None = None,
-) -> UsKia | UsHyundai | UsGenesis:
+    client_secret: str | None = None,
+    cfb: str | None = None,
+) -> UsKia | UsHyundai | UsGenesis | JpHyundai:
     """Get or create a shared API connection for all vehicles.
 
     This prevents session conflicts when multiple vehicles are set up
@@ -219,6 +225,23 @@ async def _get_or_create_api_connection(
             await api_connection.login()
             _LOGGER.debug("Login successful, access_token: %s", api_connection.access_token is not None)
 
+        elif brand == BRAND_JP_HYUNDAI:
+            if not client_secret:
+                raise ConfigEntryError("Client secret required for Hyundai Japan Bluelink")
+
+            api_connection = JpHyundai(
+                username=username,
+                password=password,
+                client_secret=client_secret,
+                pin=pin,
+                client_session=client_session,
+                cfb=cfb,
+            )
+
+            _LOGGER.debug("Logging in to Hyundai Japan Bluelink API...")
+            await api_connection.login()
+            _LOGGER.debug("Login successful, access_token: %s", api_connection.access_token is not None)
+
         else:
             raise ConfigEntryError(f"Unknown brand: {brand}")
 
@@ -238,13 +261,15 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry):
     """
     # Get brand with fallback for legacy entries
     brand = config_entry.data.get(CONF_BRAND, BRAND_KIA)
-    brand_name = BRANDS.get(brand, brand)
+    brand_name = SELECTABLE_BRANDS.get(brand, brand)
 
     username = config_entry.data[CONF_USERNAME]
     password = config_entry.data[CONF_PASSWORD]
     device_id = config_entry.data.get(CONF_DEVICE_ID)
     refresh_token = config_entry.data.get(CONF_REFRESH_TOKEN)
     pin = config_entry.data.get(CONF_PIN)
+    client_secret = config_entry.data.get(CONF_CLIENT_SECRET)
+    cfb = config_entry.data.get(CONF_CFB) or None
     vehicles_config = config_entry.data.get(CONF_VEHICLES, [])
 
     scan_interval = timedelta(
@@ -266,6 +291,8 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry):
             device_id=device_id,
             refresh_token=refresh_token,
             pin=pin,
+            client_secret=client_secret,
+            cfb=cfb,
         )
 
         if api_connection.vehicles is None:

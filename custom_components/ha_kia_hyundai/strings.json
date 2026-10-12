@@ -27,6 +27,17 @@
       "reauth_confirm": {
         "title": "[%key:common::config_flow::title::reauth%]",
         "description": "The Kia Hyundai Genesis (USA) integration needs to re-authenticate your account."
+      },
+      "jp_credentials": {
+        "title": "Hyundai Japan (Bluelink)",
+        "description": "Enter your Hyundai Japan Bluelink account. The client secret is the app's OAuth secret you extracted yourself; the PIN is optional and only needed for future remote control.",
+        "data": {
+          "username": "Email",
+          "password": "Password",
+          "client_secret": "Client secret",
+          "pin": "Remote control PIN (optional)",
+          "cfb": "CFB key (optional — enables live status/control)"
+        }
       }
     },
     "abort": {

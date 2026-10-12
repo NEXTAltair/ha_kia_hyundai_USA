@@ -15,16 +15,36 @@ CONF_DEVICE_ID: str = "device_id"
 CONF_REFRESH_TOKEN: str = "refresh_token"
 CONF_BRAND: str = "brand"
 CONF_PIN: str = "pin"
+# JP Hyundai Bluelink only: the app's OAuth client secret, supplied by the
+# user (never shipped in source). See kia_hyundai_api/const.py.
+CONF_CLIENT_SECRET: str = "client_secret"
+# JP Hyundai Bluelink only (optional): the app-embedded "CFB" key used to
+# sign the Stamp header. Supplying it enables live status + remote control;
+# leaving it blank keeps the integration at login + vehicle-list only.
+CONF_CFB: str = "cfb"
 
 # Brand constants
 BRAND_KIA: str = "kia"
 BRAND_HYUNDAI: str = "hyundai"
 BRAND_GENESIS: str = "genesis"
+# Japan (Hyundai Mobility Japan) Bluelink. Separate backend from the US
+# brands; login + vehicle list work, remote status/control pending. Keep
+# this out of the main BRANDS dict used by the config-flow dropdown until
+# it is more complete and the repo owner decides to surface it.
+BRAND_JP_HYUNDAI: str = "jp_hyundai"
 
 BRANDS = {
     BRAND_KIA: "Kia",
     BRAND_HYUNDAI: "Hyundai",
     BRAND_GENESIS: "Genesis",
+}
+
+# Brands offered in the config-flow brand dropdown. JP is included so it can
+# be set up, but defined separately so the repo owner can easily drop it back
+# out of the UI without touching BRANDS (which other code iterates).
+SELECTABLE_BRANDS = {
+    **BRANDS,
+    BRAND_JP_HYUNDAI: "Hyundai (Japan)",
 }
 
 CONFIG_FLOW_TEMP_VEHICLES: str = "_temp_vehicles"

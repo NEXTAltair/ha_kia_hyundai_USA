@@ -10,6 +10,7 @@ This is a fork of kia-hyundai-api with the following fixes:
 from .const import SeatSettings
 from .errors import BaseError, RateError, AuthError
 from .us_kia import UsKia
+from .jp_hyundai import JpHyundai
 
-__all__ = ["UsKia", "SeatSettings", "BaseError", "RateError", "AuthError"]
+__all__ = ["UsKia", "JpHyundai", "SeatSettings", "BaseError", "RateError", "AuthError"]
 __version__ = "2.0.0"

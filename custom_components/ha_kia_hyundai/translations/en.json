@@ -36,6 +36,17 @@
       "confirm_vehicles": {
         "title": "Confirm {brand} Vehicles",
         "description": "Found {vehicle_count} vehicle(s) in your account:\n\n{vehicle_list}\n\nClick Submit to add all vehicles to Home Assistant. You can assign areas to each vehicle after setup."
+      },
+      "jp_credentials": {
+        "title": "Hyundai Japan (Bluelink)",
+        "description": "Enter your Hyundai Japan Bluelink account. The client secret is the app's OAuth secret you extracted yourself; the PIN is optional and only needed for future remote control.",
+        "data": {
+          "username": "Email",
+          "password": "Password",
+          "client_secret": "Client secret",
+          "pin": "Remote control PIN (optional)",
+          "cfb": "CFB key (optional — enables live status/control)"
+        }
       }
     },
     "error": {
