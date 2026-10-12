@@ -5,6 +5,11 @@ Connected Car Services backend (`ccs-apigw.hyundaijapan.com`). Cached vehicle
 status can now use a **local Stamp service** backed by the user's installed
 official Android app.
 
+Live validation and the current JP work scope are limited to **IONIQ 5 EV**.
+Other models, including ICE, HEV and PHEV vehicles, are unverified and outside
+the current scope. Shared protocol fixtures do not establish live support for
+those vehicles.
+
 ## Verification status
 
 - OAuth login and `/api/v1/user/cars`: verified with a real JP account.
@@ -69,10 +74,13 @@ must remain restricted to trusted hosts.
 Each snapshot obtains a fresh Stamp. The signer reconnects once if its Frida
 agent is unloaded; other signing failures return HTTP 503 without raw errors.
 The app PID and Frida port forward must remain valid. Device registration is
-cached until the integration restarts. Registration uses the signing headers without account
-Authorization; status requests add the account Bearer token, device ID and
-CCS2 protocol header. Account headers and cookies are never sent to the
-Stamp provider.
+cached until restart or a backend rejection (`resCode: 4002`). A rejected
+device registration is discarded and status is retried once after registration.
+A second rejection returns an API error and leaves the cache empty so the next
+scheduled refresh can register again. Registration uses the signing headers
+without account Authorization; status requests add the account Bearer token,
+device ID and CCS2 protocol header. Account headers and cookies are never
+sent to the Stamp provider.
 
 ## Read-only real-vehicle probe
 

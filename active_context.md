@@ -231,7 +231,7 @@ Branch: `issue-1-jp-status`; worktree:
   (`scripts/jp_status_probe.py`), Stamp URL config/Options and reload,
   CCS2/legacy snapshot normalization, JP EV metadata fallback, and diagnostic
   redaction. Unsupported JP charge/limit/wake controls are not offered.
-- Local tests: 25 passed on Home Assistant 2025.1.4 / Python 3.12. Ruff passed.
+- Local tests: 31 passed on Home Assistant 2025.1.4 / Python 3.12. Ruff passed.
   Test-only ThreadedResolver avoids pycares' global shutdown-thread artifact;
   resource cleanup checks remain enabled.
 - User ran `uv run scripts/jp_status_probe.py` with local credentials and got
@@ -243,3 +243,18 @@ Branch: `issue-1-jp-status`; worktree:
   check is entity display in the user's running Home Assistant instance.
 - Read JP_BLUELINK.md for the complete setup and limitations. Local signer
   used in this session listens on 127.0.0.1:8765; Frida forwarded on 27042.
+
+## JP P1 continuation and vehicle scope (2026-10-12)
+
+- User requested only P1 (`4244623037`): recover an invalid device ID after
+  API resCode 4002. The user owns only IONIQ 5, so live validation and current
+  JP work scope are IONIQ 5 EV. ICE/HEV/PHEV and other-model review findings
+  are outside scope and must not trigger implementation without new direction.
+- A 4002 response clears both cached device ID and resolved app ID, registers
+  again with a fresh Stamp, and retries cached status once. A second rejection
+  is an API error and clears the cache for a later scheduled refresh.
+- HTTP mock regression tests cover successful recovery, bounded repeated
+  rejection and subsequent refresh, CCS2/legacy path handling, failed
+  re-registration, signer outage, and unchanged non-4002 behavior. All 31
+  tests, Ruff and diff checks pass. This failure recovery is mock-tested;
+  no device invalidation or control command was issued to the real vehicle.

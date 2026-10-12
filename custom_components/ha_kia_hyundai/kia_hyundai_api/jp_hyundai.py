@@ -3,9 +3,8 @@
 Login and vehicle discovery have been verified against a real JP account.
 The current official Android app can generate a valid Stamp through its
 native signing function; the optional local Stamp service connects it to
-this client. Device registration has been verified live. CCS2 and legacy
-status normalization follow the shared CCS schema and still need a live JP
-vehicle snapshot. Remote control is not verified.
+this client. Device registration and CCS2 cached status have been verified
+live on IONIQ 5 EV. Other models and remote control are not verified.
 
 The OAuth client secret and any legacy CFB value are user-supplied. No
 application binary, credential, or signing key is distributed with this
@@ -417,6 +416,14 @@ class JpHyundai:
         Diagnostics record the failure without exposing the raw body in logs.
         """
         await self._ensure_token_valid()
+        return await self._fetch_cached_vehicle_status(
+            vehicle_id, retry_device_registration=True
+        )
+
+    async def _fetch_cached_vehicle_status(
+        self, vehicle_id: str, *, retry_device_registration: bool
+    ) -> dict:
+        """Fetch a snapshot, recovering a rejected registration at most once."""
         self.last_status_response = None
         self.vehicle_status_responses.pop(vehicle_id, None)
 
@@ -471,6 +478,16 @@ class JpHyundai:
         self.last_status_response = body
         self.vehicle_status_responses[vehicle_id] = body
         if isinstance(body, dict) and body.get("retCode") not in (None, "S"):
+            if str(body.get("resCode")) == "4002":
+                # Even the final rejection must invalidate the cache so the
+                # next scheduled refresh can register a fresh device.
+                self.spa_device_id = None
+                self.resolved_app_id = None
+                if retry_device_registration:
+                    _LOGGER.info("JP device registration rejected; re-registering once")
+                    return await self._fetch_cached_vehicle_status(
+                        vehicle_id, retry_device_registration=False
+                    )
             self._record_fetch(vehicle_id, {"state": "api_error", "res_code": body.get("resCode")})
             return {}
         is_ev = any(car.get("id") == vehicle_id and car.get("is_ev")
