@@ -100,10 +100,53 @@ async def test_jp_flow_entities_and_stamp_options(hass, ccs2_body, with_stamp):
             entity.domain in ("switch", "number", "button", "lock", "climate")
             for entity in entities
         )
+        sensitive_fields = {
+            key: f"private-value-{key}"
+            for key in (
+                "vehicleId",
+                "deviceId",
+                "carId",
+                "VIN",
+                "Stamp",
+                "username",
+                "password",
+                "client_secret",
+                "access_token",
+                "refresh_token",
+                "accessToken",
+                "refreshToken",
+                "controlToken",
+                "token",
+                "Authorization",
+                "email",
+            )
+        }
+        get_coordinator(hass, "test-car").api_connection.vehicle_status_responses[
+            "test-car"
+        ] = {
+            "retCode": "S",
+            "resMsg": {
+                "nested": [sensitive_fields],
+                "state": ccs2_body["resMsg"]["state"],
+            },
+        }
         diagnostics = await async_get_config_entry_diagnostics(hass, entry)
-        assert "test-secret" not in json.dumps(diagnostics, default=str)
-        assert "test-password" not in json.dumps(diagnostics, default=str)
-        assert "test@example.invalid" not in json.dumps(diagnostics, default=str)
+        serialized = json.dumps(diagnostics, default=str)
+        assert "test-secret" not in serialized
+        assert "test-password" not in serialized
+        assert "test@example.invalid" not in serialized
+        assert all(value not in serialized for value in sensitive_fields.values())
+        raw = diagnostics["vehicles"]["test-car"]["jp_status_response"]
+        assert raw["retCode"] == "S"
+        assert (
+            raw["resMsg"]["state"]["Vehicle"]["Green"]["BatteryManagement"][
+                "BatteryRemain"
+            ]["Ratio"]
+            == 73
+        )
+        assert (
+            raw["resMsg"]["state"]["Vehicle"]["Location"]["GeoCoord"] == "**REDACTED**"
+        )
         # A new password must not clear the signer URL from initial setup.
         reauth = await hass.config_entries.flow.async_init(
             DOMAIN,

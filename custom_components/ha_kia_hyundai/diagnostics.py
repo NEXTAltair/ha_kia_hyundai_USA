@@ -48,7 +48,12 @@ TO_REDACT_RAW = {
     "Longitude",
     "GeoCoord",
     "invDealerCode",
-}
+    "email",
+    "accessToken",
+    "refreshToken",
+    "token",
+    "Authorization",
+} | TO_REDACT | TO_REDACT_MAPPED
 TO_REDACT_DEVICE = {"identifiers"}
 TO_REDACT_ENTITIES = {"latitude", "longitude"}
 
