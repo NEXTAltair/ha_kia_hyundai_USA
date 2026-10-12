@@ -258,3 +258,30 @@ Branch: `issue-1-jp-status`; worktree:
   re-registration, signer outage, and unchanged non-4002 behavior. All 31
   tests, Ruff and diff checks pass. This failure recovery is mock-tested;
   no device invalidation or control command was issued to the real vehicle.
+
+
+## JP login language session (2026-10-12, Issue #4)
+
+Context: the user merged PR #2, installed it into production, re-added an
+old entry missing client_secret, and authenticated successfully. They
+reported the official Bluelink app changed from Japanese to English.
+The separate missing-secret repair Issue #3 was cancelled before code
+changes when the user chose deleting/re-adding the entry instead.
+
+Decision: match the current JP official login page by POSTing lang=ja to
+/api/v1/user/language in the authorize session before /signin. Existing
+lang=ja on the authorize URL remains. Stop before sending account credentials
+if the language endpoint rejects the request. No other-model/P2 work.
+
+Evidence and rationale: current official login bundles both set the session
+language before signin; shared CCS clients implement the same request.
+An independent anonymous JP session received HTTP 204 from the language
+endpoint. No real account login, language change, or vehicle command was
+issued during verification; the official app's resulting language needs a
+user runtime check after installing this fix.
+
+Verification: new HTTP tests fail on the prior login order, then pass with
+the fix. They cover redirect session cookies, language-before-signin for
+200/204, applying Japanese again on re-login, and no credential submission
+after 403/503. All 35 Home Assistant tests and Ruff/diff checks pass.
+Branch/worktree: issue-4-jp-login-language, based on fork/main 0827ac4.

@@ -41,6 +41,13 @@ Stamp service URL under the integration's **Options**; saving reloads the
 entry. The optional CFB field is retained for older signing schemes and is
 not the signing method verified with app 1.0.17.
 
+The login session is explicitly set to Japanese before sign-in, matching the
+JP official login page. This also runs on re-login after token expiry, in
+addition to the `lang=ja` authorize parameter. If
+the language endpoint fails, sign-in stops rather than using an unspecified
+session language. The official app's display after login still needs a user
+runtime check.
+
 ## Local Stamp service
 
 The service calls the installed official app's native signing function for
