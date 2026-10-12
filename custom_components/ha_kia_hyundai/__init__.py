@@ -354,6 +354,16 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry):
         # Create coordinators for all vehicles
         coordinators: dict[str, VehicleCoordinator] = {}
 
+        # Device "manufacturer" shown in HA. BRANDS gives the US display names
+        # (Kia/Hyundai/Genesis); JP is a Hyundai regardless of its longer UI
+        # label. Replaces the old hardcoded "US Kia".
+        manufacturer = {
+            BRAND_KIA: "Kia",
+            BRAND_HYUNDAI: "Hyundai",
+            BRAND_GENESIS: "Genesis",
+            BRAND_JP_HYUNDAI: "Hyundai",
+        }.get(brand, "Kia/Hyundai")
+
         for vehicle_info in vehicles_config:
             vehicle_id = vehicle_info.get("id")
             vehicle_name = vehicle_info.get("name", "Unknown")
@@ -374,6 +384,7 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry):
                 vehicle_model=vehicle_model,
                 api_connection=api_connection,
                 scan_interval=scan_interval,
+                manufacturer=manufacturer,
             )
 
             # Do first refresh

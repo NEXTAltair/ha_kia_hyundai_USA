@@ -61,11 +61,13 @@ class VehicleCoordinator(DataUpdateCoordinator):
         vehicle_model: str,
         api_connection: ApiConnection,
         scan_interval: timedelta,
+        manufacturer: str = "Kia/Hyundai",
     ) -> None:
         """Initialize the coordinator."""
         self.vehicle_id: str = vehicle_id
         self.vehicle_name: str = vehicle_name
         self.vehicle_model: str = vehicle_model
+        self.manufacturer: str = manufacturer
         self.api_connection: ApiConnection = api_connection
 
         request_refresh_debouncer = Debouncer(
