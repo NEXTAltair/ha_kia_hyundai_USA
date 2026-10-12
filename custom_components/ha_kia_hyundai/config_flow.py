@@ -26,11 +26,13 @@ from homeassistant.const import (
 )
 from homeassistant.core import callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.selector import TextSelector, TextSelectorConfig, TextSelectorType
 
 # Use embedded API libraries
 from .kia_hyundai_api import UsKia, AuthError, JpHyundai
 from .kia_hyundai_api.us_hyundai import UsHyundai
 from .kia_hyundai_api.us_genesis import UsGenesis
+from .kia_hyundai_api.jp_hyundai import validate_cfb
 
 from .const import (
     CONF_BRAND,
@@ -75,6 +77,9 @@ class KiaUvoOptionFlowHandler(OptionsFlow):
         )
         if config_entry.data.get(CONF_BRAND) == BRAND_JP_HYUNDAI:
             self.schema = self.schema.extend({
+                vol.Optional(CONF_CFB, default=config_entry.options.get(
+                    CONF_CFB, config_entry.data.get(CONF_CFB, "")
+                )): TextSelector(TextSelectorConfig(type=TextSelectorType.PASSWORD)),
                 vol.Optional(CONF_STAMP_URL, default=config_entry.options.get(
                     CONF_STAMP_URL, config_entry.data.get(CONF_STAMP_URL, "")
                 )): vol.Any("", vol.Url()),
@@ -83,6 +88,14 @@ class KiaUvoOptionFlowHandler(OptionsFlow):
     async def async_step_init(self, user_input: dict[str, Any] | None = None):
         """Handle options flow."""
         if user_input is not None:
+            if user_input.get(CONF_CFB):
+                try:
+                    user_input[CONF_CFB] = validate_cfb(user_input[CONF_CFB])
+                except ValueError:
+                    return self.async_show_form(
+                        step_id="init", data_schema=self.schema,
+                        errors={CONF_CFB: "invalid_cfb"},
+                    )
             return self.async_create_entry(title="", data=user_input)
 
         return self.async_show_form(step_id="init", data_schema=self.schema)
@@ -120,6 +133,7 @@ class KiaUvoConfigFlowHandler(config_entries.ConfigFlow):
             self.data[CONF_USERNAME] = user_input.get(CONF_USERNAME, "")
             self.data[CONF_BRAND] = user_input.get(CONF_BRAND, BRAND_KIA)
             self.data[CONF_STAMP_URL] = user_input.get(CONF_STAMP_URL, "")
+            self.data[CONF_CFB] = user_input.get(CONF_CFB, "")
         # Show the brand selection form
         return await self.async_step_user(None)
 
@@ -356,7 +370,8 @@ class KiaUvoConfigFlowHandler(config_entries.ConfigFlow):
             vol.Required(CONF_USERNAME, default=default_username): str,
             vol.Required(CONF_PASSWORD): str,
             vol.Required(CONF_CLIENT_SECRET): str,
-            vol.Optional(CONF_CFB, default=""): str,
+            vol.Optional(CONF_CFB, default=self.data.get(CONF_CFB, "")):
+                TextSelector(TextSelectorConfig(type=TextSelectorType.PASSWORD)),
             vol.Optional(CONF_STAMP_URL, default=self.data.get(CONF_STAMP_URL, "")): str,
             vol.Optional(CONF_PIN, default=""): str,
         })
@@ -366,7 +381,15 @@ class KiaUvoConfigFlowHandler(config_entries.ConfigFlow):
             username = user_input[CONF_USERNAME]
             password = user_input[CONF_PASSWORD]
             client_secret = user_input[CONF_CLIENT_SECRET]
-            cfb = user_input.get(CONF_CFB) or None
+            cfb = user_input.get(CONF_CFB, self.data.get(CONF_CFB, "")) or None
+            if cfb:
+                try:
+                    cfb = validate_cfb(cfb)
+                except ValueError:
+                    return self.async_show_form(
+                        step_id="jp_credentials", data_schema=data_schema,
+                        errors={CONF_CFB: "invalid_cfb"},
+                    )
             stamp_url = user_input.get(
                 CONF_STAMP_URL, self.data.get(CONF_STAMP_URL, "")
             ) or None

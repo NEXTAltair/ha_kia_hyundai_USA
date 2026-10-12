@@ -30,14 +30,14 @@
       },
       "jp_credentials": {
         "title": "Hyundai Japan (Bluelink)",
-        "description": "Enter your Hyundai Japan Bluelink account and OAuth client secret. A local Stamp service enables cached vehicle status. Remote controls are not yet verified.",
+        "description": "Enter your Hyundai Japan Bluelink account and OAuth client secret. CFB signing data enables cached vehicle status without an external Stamp service. Remote controls are not yet verified.",
         "data": {
           "username": "Email",
           "password": "Password",
           "client_secret": "Client secret",
           "pin": "Remote control PIN (optional)",
-          "cfb": "Legacy CFB key (optional)",
-          "stamp_url": "Stamp service URL (optional)"
+          "cfb": "CFB signing data (for vehicle status)",
+          "stamp_url": "Stamp service URL (legacy fallback, optional)"
         }
       }
     },
@@ -45,7 +45,8 @@
       "reauth_successful": "[%key:common::config_flow::abort::reauth_successful%]"
     },
     "error": {
-      "auth": "Login failed. Please use the official app to logout and log back in, then try again."
+      "auth": "Login failed. Please use the official app to logout and log back in, then try again.",
+      "invalid_cfb": "Invalid signing data. Enter the Base64 cfb value from the JP setup file."
     }
   },
   "options": {
@@ -54,9 +55,14 @@
         "title": "Kia Hyundai Genesis (USA): Configuration",
         "data": {
           "scan_interval": "Scan Interval in Minutes",
-          "stamp_url": "Stamp service URL (Japan only, optional)"
-        }
+          "stamp_url": "Stamp service URL (legacy fallback, optional)",
+          "cfb": "CFB signing data (Japan only)"
+        },
+        "description": "For Japan, enter CFB signing data to generate Stamps in Home Assistant. A Stamp service URL is unnecessary when CFB is configured."
       }
+    },
+    "error": {
+      "invalid_cfb": "Invalid signing data. Enter the Base64 cfb value from the JP setup file."
     }
   },
   "services": {

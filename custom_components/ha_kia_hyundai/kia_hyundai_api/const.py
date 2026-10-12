@@ -54,8 +54,9 @@ JP_HYUNDAI_CLIENT_SECRET = None
 # registration tries each until one is accepted, so the correct one does not
 # need to be pinned down in advance.
 JP_HYUNDAI_APP_ID_CANDIDATES = [
-    "29faeaf5-958c-44ad-a2aa-0dad290a1511",
+    # Verified with Japanese Android app 1.0.17 and local CFB signing.
     "8be122e0-b0d9-40b5-a46e-67b25194ba88",
+    "29faeaf5-958c-44ad-a2aa-0dad290a1511",
     "b7b049e3-9978-41e4-839a-a8bb929dcafc",
     "c26da3fa-a163-472f-9e28-a380c470a697",
     "d71b3c0a-a2de-4d7c-8536-2f0d88489342",
@@ -63,9 +64,8 @@ JP_HYUNDAI_APP_ID_CANDIDATES = [
     "ee90fe1d-812e-4ff4-891c-63910a8bae91",
     "efb053c1-283a-4dca-8bbe-bb81e5e49832",
 ]
-# The "CFB" key used to sign the Stamp header is an app-embedded secret, the
-# same class as JP_HYUNDAI_CLIENT_SECRET, and is intentionally NOT shipped
-# here. Supply it at runtime (config entry) to enable live status/control.
+# CFB signing data is provisioned once from the user's installed app. It is
+# intentionally not shipped here; supply it through the JP configuration.
 JP_HYUNDAI_CFB = None
 
 

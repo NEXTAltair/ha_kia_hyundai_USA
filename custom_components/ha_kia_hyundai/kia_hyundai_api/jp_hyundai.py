@@ -1,12 +1,13 @@
 """JpHyundai - Hyundai Bluelink API for Japan (Hyundai Mobility Japan Co., Ltd.).
 
 Login and vehicle discovery have been verified against a real JP account.
-The current official Android app can generate a valid Stamp through its
-native signing function; the optional local Stamp service connects it to
-this client. Device registration and CCS2 cached status have been verified
-live on IONIQ 5 EV. Other models and remote control are not verified.
+Stamps are generated in-process using user-supplied CFB signing data, verified
+against the official app's native signer. The external Stamp service remains
+a fallback for existing installations. Device registration and CCS2 cached
+status have been verified live on IONIQ 5 EV. Other models and remote control
+are not verified.
 
-The OAuth client secret and any legacy CFB value are user-supplied. No
+The OAuth client secret and CFB signing data are user-supplied. No
 application binary, credential, or signing key is distributed with this
 integration. See JP_BLUELINK.md for setup and validation steps.
 """
@@ -34,6 +35,19 @@ _LOGGER = logging.getLogger(__name__)
 
 USER_AGENT = "okhttp/3.12.0"
 
+
+def validate_cfb(value: str) -> str:
+    """Validate signing data for a UUID plus a ten-digit Unix timestamp."""
+    value = value.strip()
+    try:
+        decoded = base64.b64decode(value, validate=True)
+    except (TypeError, ValueError) as err:
+        raise ValueError("Invalid JP CFB signing data") from err
+    if len(decoded) != 47:
+        raise ValueError("JP CFB signing data must contain 47 bytes")
+    return value
+
+
 _JP_CONTROL_UNSUPPORTED = (
     "Remote control/status is not available for JP Hyundai yet: the CCS API "
     "gateway rejects the /spa/vehicles endpoints without the native app's "
@@ -57,7 +71,7 @@ class JpHyundai:
     # Refresh the token this many seconds before it actually expires.
     TOKEN_REFRESH_BUFFER_SECONDS = 300
 
-    # Resolved during device registration (only when cfb is supplied).
+    # Resolved during device registration.
     spa_device_id: str | None = None
     resolved_app_id: str | None = None
 
@@ -97,10 +111,9 @@ class JpHyundai:
         self.client_secret = client_secret
         self.pin = pin
         self.device_id = str(uuid.uuid4())
-        # Optional app-embedded CFB key (base64), user-supplied. When present
-        # it unlocks the /spa/* device-identity flow (status + control). When
-        # None, those stay disabled and degrade gracefully.
-        self.cfb = cfb
+        # Provisioned once; regular requests need no app or external signer.
+        # The signing data is bound to the application's UUID.
+        self.cfb = validate_cfb(cfb) if cfb else None
         self.stamp_url = stamp_url
         if stamp_url:
             parsed_url = urlparse(stamp_url)
@@ -293,28 +306,29 @@ class JpHyundai:
         ]
         return self.vehicles
 
-    # The local provider uses the official app's native signer. The older
-    # XOR/CFB implementation is kept as an optional compatibility path.
+    # Local signing takes precedence over the external provider. For a fixed
+    # app UUID, the native signer uses the same XOR mask for all 47 input
+    # bytes, including the ten-digit timestamp. Verified on app 1.0.17.
 
     @property
     def spa_enabled(self) -> bool:
-        """True if a Stamp service or legacy CFB key was configured."""
+        """True if local signing data or an external provider was configured."""
         return bool(self.cfb or self.stamp_url)
 
     def _get_stamp(self, app_id: str) -> str:
         try:
             cfb_bytes = base64.b64decode(self.cfb, validate=True)
         except (TypeError, ValueError) as err:
-            raise ClientError("Invalid legacy CFB signing key") from err
-        if not cfb_bytes:
-            raise ClientError("Invalid legacy CFB signing key")
+            raise ClientError("Invalid JP CFB signing data") from err
         raw = f"{app_id}:{int(time.time())}".encode()
-        xored = bytes(b ^ cfb_bytes[i % len(cfb_bytes)] for i, b in enumerate(raw))
+        if len(cfb_bytes) != len(raw):
+            raise ClientError("JP Stamp input does not match signing data length")
+        xored = bytes(b ^ mask for b, mask in zip(raw, cfb_bytes))
         return base64.b64encode(xored).decode()
 
     async def _spa_headers(self, app_id: str, device_id: str) -> dict:
-        stamp = self._get_stamp(app_id) if not self.stamp_url else None
-        if self.stamp_url:
+        stamp = self._get_stamp(app_id) if self.cfb else None
+        if not self.cfb and self.stamp_url:
             # Never forward account headers or cookies to the signing service.
             # A short-lived isolated session also avoids absorbing its cookies
             # into the account session. Redirects are deliberately rejected.
@@ -368,7 +382,8 @@ class JpHyundai:
             return True
         await self._ensure_token_valid()
 
-        app_ids = ("",) if self.stamp_url else JP_HYUNDAI_APP_ID_CANDIDATES
+        use_provider = bool(self.stamp_url and not self.cfb)
+        app_ids = ("",) if use_provider else JP_HYUNDAI_APP_ID_CANDIDATES
         for app_id in app_ids:
             device_id = str(uuid.uuid4())
             payload = {
@@ -389,7 +404,7 @@ class JpHyundai:
                     headers=headers,
                 )
             except (ClientError, TimeoutError) as err:
-                if self.stamp_url:
+                if use_provider:
                     raise
                 _LOGGER.debug("JP device register failed: %s", type(err).__name__)
                 continue

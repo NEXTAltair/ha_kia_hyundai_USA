@@ -2,8 +2,9 @@
 
 This fork supports login and vehicle discovery on Hyundai Mobility Japan's
 Connected Car Services backend (`ccs-apigw.hyundaijapan.com`). Cached vehicle
-status can now use a **local Stamp service** backed by the user's installed
-official Android app.
+status uses **Stamps generated inside Home Assistant** from signing data
+configured once. Regular operation does not require an Android emulator,
+Frida, or an external Stamp server.
 
 Live validation and the current JP work scope are limited to **IONIQ 5 EV**.
 Other models, including ICE, HEV and PHEV vehicles, are unverified and outside
@@ -17,6 +18,10 @@ those vehicles.
   against the real JP backend with official Android Bluelink **1.0.17**
   (version code 10260), including registration through this integration.
   The response was HTTP 200, `retCode: S`, `resCode: 0000`.
+- In-process signing: eight different ten-digit timestamps produced exactly
+  the same results as the official app's native signer. Device registration
+  using a Python-generated Stamp also returned HTTP 200 / S / 0000 on
+  2026-10-12, without calling a Stamp service.
 - CCS2 cached status: verified with a real JP IONIQ 5 on 2026-10-12 using
   `scripts/jp_status_probe.py`. The integration retrieved battery SOC,
   location, door/charging state and odometer through the native Stamp service.
@@ -37,9 +42,11 @@ restart. Add the integration, select **Hyundai (Japan)**, and enter your
 Bluelink email, password and OAuth client secret.
 
 Existing identity-only entries can keep their credentials. Configure the
-Stamp service URL under the integration's **Options**; saving reloads the
-entry. The optional CFB field is retained for older signing schemes and is
-not the signing method verified with app 1.0.17.
+**CFB signing data** under the integration's **Options**; saving reloads the
+entry. Use the `cfb` value from the private setup file described below. Leave
+the Stamp service URL empty. If an old URL remains configured, local CFB
+signing takes precedence and the URL is not contacted. CFB signing data is
+preserved across reauthentication and redacted from diagnostics.
 
 The login session is explicitly set to Japanese before sign-in, matching the
 JP official login page. This also runs on re-login after token expiry, in
@@ -48,14 +55,20 @@ the language endpoint fails, sign-in stops rather than using an unspecified
 session language. The official app's display after login still needs a user
 runtime check.
 
-## Local Stamp service
+## One-time signing setup
 
-The service calls the installed official app's native signing function for
-each request. It does not read account passwords or export the signing key.
-It requires the official app to remain open in a compatible Android test
-emulator/device with a matching Frida server already running. This is an
-experimental development setup; it is not a self-contained HACS installation.
-The obfuscated app field used by the adapter can change in other versions.
+For app **1.0.17**, a fixed application UUID and a ten-digit Unix timestamp
+produce a 47-byte Stamp. The same 47-byte XOR mask reproduces the native
+output at different timestamps. Home Assistant stores this mask as CFB
+signing data and creates a fresh Stamp for each request locally. This is the
+same kind of local signing used by the existing EU/AU client implementations.
+
+Provisioning calls the user's installed official app once to obtain and
+cross-check signing samples. This initial step needs a compatible Android
+emulator/device, the official app open, and a matching Frida server. It does
+not read the account password or issue any vehicle commands. The app's
+obfuscated field can change with app versions; the setup fails if the app ID
+or signing format is unsupported.
 
 Forward the Frida port and determine the running app's PID:
 
@@ -64,37 +77,42 @@ adb -s emulator-5584 forward tcp:27042 tcp:27042
 adb -s emulator-5584 shell pidof com.hyundai.bluelink.jp
 ```
 
-Start the service using the returned PID (replace `1234`):
+Save the configuration using the returned PID (replace `1234`):
 
 ```bash
-uv run scripts/jp_stamp_server.py --pid 1234
+mkdir -p local-private
+uv run scripts/jp_stamp_setup.py --pid 1234 --output local-private/jp-stamp-config.json
 ```
 
-It listens at `http://127.0.0.1:8765/stamp` by default and returns
-`{"app_id": "...", "stamp": "..."}` with `Cache-Control: no-store`.
-Configure this URL in the integration. It must be reachable **from Home
-Assistant**: localhost inside a container or another machine is a different
-host. Use a private network or an SSH tunnel to the signer. `--host` and
-`--port` can change its listen address; the service has no authentication and
-must remain restricted to trusted hosts.
+The script verifies eight native samples, creates a mode-0600 JSON file, and
+refuses to overwrite an existing file. Signing values are never printed.
+Enter the file's `cfb` value in the integration's **Options → CFB signing
+data**. Keep the file private; `local-private/` is excluded from Git. Once
+configured, the Android environment, Frida and Stamp server can be stopped.
 
-Each snapshot obtains a fresh Stamp. The signer reconnects once if its Frida
-agent is unloaded; other signing failures return HTTP 503 without raw errors.
-The app PID and Frida port forward must remain valid. Device registration is
-cached until restart or a backend rejection (`resCode: 4002`). A rejected
+Device registration is cached until restart or a backend rejection
+(`resCode: 4002`). A rejected
 device registration is discarded and status is retried once after registration.
 A second rejection returns an API error and leaves the cache empty so the next
 scheduled refresh can register again. Registration uses the signing headers
 without account Authorization; status requests add the account Bearer token,
 device ID and CCS2 protocol header. Account headers and cookies are never
-sent to the Stamp provider.
+sent to an external Stamp provider.
+
+## Existing external Stamp installations
+
+The optional `scripts/jp_stamp_server.py` remains available for earlier
+development setups. Its URL is used only when CFB signing data is absent.
+It binds to `http://127.0.0.1:8765/stamp` by default; existing installations
+still need an address reachable from Home Assistant. This fallback server
+has no authentication and must remain restricted to trusted hosts.
 
 ## Read-only real-vehicle probe
 
-With the Stamp service running, run:
+With local signing data configured in the private file, run:
 
 ```bash
-uv run scripts/jp_status_probe.py
+uv run scripts/jp_status_probe.py --cfb-file local-private/jp-stamp-config.json
 ```
 
 It prompts locally for the email, password and client secret, logs in, and
@@ -103,7 +121,8 @@ or send control commands. Credentials are not saved. The terminal prints
 only fetch status codes, and `/tmp/jp-status.redacted.json` contains redacted
 raw/normalized response data to check the JP schema. Inspect the file before
 sharing it, since unexpected backend fields may carry additional information.
-`--stamp-url` and `--output` override these defaults.
+`--stamp-url` explicitly selects the older external provider instead;
+`--output` changes the diagnostic output path.
 
 ## Vehicle state and diagnostics
 
