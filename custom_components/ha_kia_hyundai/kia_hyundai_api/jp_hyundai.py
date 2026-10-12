@@ -134,7 +134,22 @@ class JpHyundai:
         )
         await self.api_session.get(authorize_url, headers={"User-Agent": USER_AGENT})
 
-        # Step 2: POST signin (matches the official web client's
+        # Step 2: The JP web client sets the session language before signin.
+        # This is separate from the lang=ja authorize parameter.
+        async with self.api_session.post(
+            JP_HYUNDAI_USER_API_URL + "language",
+            json={"lang": "ja"},
+            headers={"Content-Type": "application/json", "User-Agent": USER_AGENT},
+        ) as language_response:
+            if language_response.status not in range(200, 300):
+                raise AuthError(
+                    "JP Hyundai session language setup failed "
+                    f"(HTTP {language_response.status})."
+                )
+            # The gateway normally returns 204 with no JSON body.
+            await language_response.read()
+
+        # Step 3: POST signin (matches the official web client's
         # account.signin({email,password,mobileNum}) call to this same path).
         signin_response = await self.api_session.post(
             JP_HYUNDAI_USER_API_URL + "signin",
@@ -175,7 +190,7 @@ class JpHyundai:
             )
         authorization_code = codes[0]
 
-        # Step 3: exchange the authorization code for an access token.
+        # Step 4: exchange the authorization code for an access token.
         await self._exchange_code_for_token(authorization_code)
         _LOGGER.info("JP Hyundai login succeeded")
 
