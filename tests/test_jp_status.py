@@ -14,6 +14,7 @@ def test_ccs2_units_and_state(ccs2_body):
     assert status["evStatus"]["batteryStatus"] == 73
     assert status["evStatus"]["batteryCharge"] is True
     assert status["evStatus"]["batteryPlugin"] is True
+    assert status["batteryStatus"]["stateOfCharge"] == 90
     assert status["doorLock"] is True
     assert status["doorStatus"]["trunk"] is True
     assert status["engine"] is False
@@ -45,6 +46,27 @@ def test_missing_and_sentinel_values_stay_unknown(ccs2_body):
         ]["doorLock"]
         is False
     )
+
+
+@pytest.mark.parametrize("fraction", ["000", "123456"])
+def test_ccs2_fractional_timestamp(ccs2_body, fraction):
+    ccs2_body["resMsg"]["state"]["Vehicle"]["Date"] = f"20261012010000.{fraction}"
+    data = normalize_status(ccs2_body)
+    status = data["lastVehicleInfo"]["vehicleStatusRpt"]["vehicleStatus"]
+    assert status["syncDate"]["utc"] == "20261012010000"
+
+
+@pytest.mark.parametrize("reliability", [0, 1, "0", "1"])
+def test_ccs2_auxiliary_battery_reliability(ccs2_body, reliability):
+    ccs2_body["resMsg"]["state"]["Vehicle"]["Electronics"]["Battery"][
+        "SensorReliability"
+    ] = reliability
+    data = normalize_status(ccs2_body)
+    status = data["lastVehicleInfo"]["vehicleStatusRpt"]["vehicleStatus"]
+    if reliability in (1, "1"):
+        assert "batteryStatus" not in status
+    else:
+        assert status["batteryStatus"]["stateOfCharge"] == 90
 
 
 def test_legacy_jst_and_distance_units():

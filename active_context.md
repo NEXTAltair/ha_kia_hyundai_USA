@@ -231,13 +231,15 @@ Branch: `issue-1-jp-status`; worktree:
   (`scripts/jp_status_probe.py`), Stamp URL config/Options and reload,
   CCS2/legacy snapshot normalization, JP EV metadata fallback, and diagnostic
   redaction. Unsupported JP charge/limit/wake controls are not offered.
-- Local tests: 16 passed on Home Assistant 2025.1.4 / Python 3.12. Ruff passed.
+- Local tests: 22 passed on Home Assistant 2025.1.4 / Python 3.12. Ruff passed.
   Test-only ThreadedResolver avoids pycares' global shutdown-thread artifact;
   resource cleanup checks remain enabled.
-- Actual user password/access token is not available locally. The real
-  IONIQ 5 status response and carId-to-spa-ID assumption remain unverified.
-  Next real test: run `uv run scripts/jp_status_probe.py` with the signer
-  running; enter credentials locally. Redacted output is
-  `/tmp/jp-status.redacted.json`. No wake/door/charging command is issued.
+- User ran `uv run scripts/jp_status_probe.py` with local credentials and got
+  `[{"state": "ok"}]`. Real IONIQ 5 CCS2 status and carId-to-spa-ID matching
+  are now verified. Battery SOC and valid coordinates were returned; account
+  credentials remain unsaved. Redacted output is `/tmp/jp-status.redacted.json`.
+  The response's `Vehicle.Date` has fractional seconds; the parser now handles
+  this format. No wake/door/charging command was issued. The remaining runtime
+  check is entity display in the user's running Home Assistant instance.
 - Read JP_BLUELINK.md for the complete setup and limitations. Local signer
   used in this session listens on 127.0.0.1:8765; Frida forwarded on 27042.

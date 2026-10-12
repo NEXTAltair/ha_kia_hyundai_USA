@@ -1,7 +1,7 @@
 """Normalize CCS vehicle snapshots for the shared US-format coordinator.
 
-CCS2 field paths follow hyundai_kia_connect_api's ApiImplType1. Japan live
-responses still need verification. Missing fields stay missing, including
+CCS2 field paths follow hyundai_kia_connect_api's ApiImplType1 and were
+verified against a Japan live response. Missing fields stay missing, including
 unknown enum values, so an incomplete snapshot cannot imply a vehicle state.
 The coordinator's distance and temperature sensors expect miles/Fahrenheit.
 """
@@ -64,8 +64,10 @@ def _timestamp(value, source_timezone):
     if not isinstance(value, str):
         return None
     try:
-        if len(value) == 14 and value.isdigit():
-            result = datetime.strptime(value, "%Y%m%d%H%M%S")
+        compact, separator, _fraction = value.partition(".")
+        if len(compact) == 14 and compact.isdigit():
+            date_format = "%Y%m%d%H%M%S.%f" if separator else "%Y%m%d%H%M%S"
+            result = datetime.strptime(value, date_format)
         else:
             result = datetime.fromisoformat(value.replace("Z", "+00:00"))
         if result.tzinfo is None:
@@ -99,7 +101,8 @@ def _ccs2(state: dict) -> dict:
 
     soc = _number(_get(state, "Electronics.Battery.Level"))
     reliable = _get(state, "Electronics.Battery.SensorReliability")
-    if soc is not None and 0 <= soc <= 100 and reliable != 0:
+    # CCS2's flag is 1 for an unreliable sensor, 0 for a valid reading.
+    if soc is not None and 0 <= soc <= 100 and reliable not in (1, "1"):
         _put(result, "batteryStatus.stateOfCharge", soc)
     ev_soc = _number(_get(state, "Green.BatteryManagement.BatteryRemain.Ratio"))
     if ev_soc is not None and 0 <= ev_soc <= 100:

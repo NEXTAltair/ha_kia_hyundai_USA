@@ -4,7 +4,7 @@ import json
 from unittest.mock import patch
 
 from aiohttp.resolver import ThreadedResolver
-from homeassistant.config_entries import ConfigEntryState, SOURCE_USER
+from homeassistant.config_entries import ConfigEntryState, SOURCE_REAUTH, SOURCE_USER
 from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 import pytest
@@ -104,6 +104,36 @@ async def test_jp_flow_entities_and_stamp_options(hass, ccs2_body, with_stamp):
         assert "test-secret" not in json.dumps(diagnostics, default=str)
         assert "test-password" not in json.dumps(diagnostics, default=str)
         assert "test@example.invalid" not in json.dumps(diagnostics, default=str)
+        # A new password must not clear the signer URL from initial setup.
+        reauth = await hass.config_entries.flow.async_init(
+            DOMAIN,
+            context={"source": SOURCE_REAUTH, "entry_id": entry.entry_id},
+            data=dict(entry.data),
+        )
+        reauth = await hass.config_entries.flow.async_configure(
+            reauth["flow_id"], {CONF_BRAND: BRAND_JP_HYUNDAI}
+        )
+        reauth = await hass.config_entries.flow.async_configure(
+            reauth["flow_id"],
+            {
+                "username": "test@example.invalid",
+                "password": "updated-password",
+                CONF_CLIENT_SECRET: "test-secret",
+            },
+        )
+        assert reauth["step_id"] == "confirm_vehicles"
+        reauth = await hass.config_entries.flow.async_configure(reauth["flow_id"], {})
+        assert reauth["type"] == FlowResultType.ABORT
+        assert reauth["reason"] == "reauth_successful"
+        await hass.async_block_till_done()
+        assert entry.data["password"] == "updated-password"
+        assert entry.data[CONF_STAMP_URL] == (
+            "http://127.0.0.1:8765/stamp" if with_stamp else ""
+        )
+        assert entry.state == ConfigEntryState.LOADED
+        assert hass.states.get(battery.entity_id).state == (
+            "73" if with_stamp else "unavailable"
+        )
         # Existing identity-only entries can add a signer through Options,
         # without deleting the account or entering its credentials again.
         options = await hass.config_entries.options.async_init(entry.entry_id)

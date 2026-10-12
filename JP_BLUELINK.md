@@ -12,9 +12,13 @@ official Android app.
   against the real JP backend with official Android Bluelink **1.0.17**
   (version code 10260), including registration through this integration.
   The response was HTTP 200, `retCode: S`, `resCode: 0000`.
-- CCS2 and legacy status parsing: tested against synthetic shared-CCS
-  fixtures and in Home Assistant 2025.1.4. A real JP vehicle status response
-  still needs confirmation; the user's password was not available locally.
+- CCS2 cached status: verified with a real JP IONIQ 5 on 2026-10-12 using
+  `scripts/jp_status_probe.py`. The integration retrieved battery SOC,
+  location, door/charging state and odometer through the native Stamp service.
+  JP timestamps include fractional seconds (`YYYYMMDDHHmmss.SSS`).
+- CCS2 and legacy parsing and Home Assistant entities: tested with synthetic
+  fixtures in Home Assistant 2025.1.4. Legacy status and display in the user's
+  running Home Assistant instance have not been verified with a live car.
 - Remote commands: unverified; JP wake, charging and charge-limit controls
   are not offered in Home Assistant.
 

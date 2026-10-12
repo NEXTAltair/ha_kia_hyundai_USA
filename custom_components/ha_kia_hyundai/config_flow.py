@@ -119,6 +119,7 @@ class KiaUvoConfigFlowHandler(config_entries.ConfigFlow):
         if user_input is not None:
             self.data[CONF_USERNAME] = user_input.get(CONF_USERNAME, "")
             self.data[CONF_BRAND] = user_input.get(CONF_BRAND, BRAND_KIA)
+            self.data[CONF_STAMP_URL] = user_input.get(CONF_STAMP_URL, "")
         # Show the brand selection form
         return await self.async_step_user(None)
 
@@ -366,7 +367,9 @@ class KiaUvoConfigFlowHandler(config_entries.ConfigFlow):
             password = user_input[CONF_PASSWORD]
             client_secret = user_input[CONF_CLIENT_SECRET]
             cfb = user_input.get(CONF_CFB) or None
-            stamp_url = user_input.get(CONF_STAMP_URL) or None
+            stamp_url = user_input.get(
+                CONF_STAMP_URL, self.data.get(CONF_STAMP_URL, "")
+            ) or None
             pin = user_input.get(CONF_PIN) or None
 
             unique_id = f"{BRAND_JP_HYUNDAI}_{username.lower()}"

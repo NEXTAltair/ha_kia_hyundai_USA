@@ -18,7 +18,7 @@ def ccs2_body():
                         "Odometer": 16093.44,
                         "FuelSystem": {"DTE": {"Total": 321.8688, "Unit": 1}},
                     },
-                    "Electronics": {"Battery": {"Level": 90, "SensorReliability": 1}},
+                    "Electronics": {"Battery": {"Level": 90, "SensorReliability": 0}},
                     "Green": {
                         "BatteryManagement": {"BatteryRemain": {"Ratio": 73}},
                         "ChargingInformation": {
