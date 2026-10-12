@@ -19,7 +19,8 @@ async def async_setup_entry(
 
     entities = []
     for coordinator in coordinators.values():
-        entities.append(RequestUpdateFromCarButton(coordinator=coordinator))
+        if coordinator.can_wake_vehicle:
+            entities.append(RequestUpdateFromCarButton(coordinator=coordinator))
         # Add remote start/stop buttons if vehicle supports climate
         if coordinator.can_remote_climate:
             entities.append(RemoteStartButton(coordinator=coordinator))

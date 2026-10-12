@@ -1,39 +1,15 @@
 """JpHyundai - Hyundai Bluelink API for Japan (Hyundai Mobility Japan Co., Ltd.).
 
-STATUS: work in progress, UNVERIFIED end-to-end. See active_context.md.
+Login and vehicle discovery have been verified against a real JP account.
+The current official Android app can generate a valid Stamp through its
+native signing function; the optional local Stamp service connects it to
+this client. Device registration has been verified live. CCS2 and legacy
+status normalization follow the shared CCS schema and still need a live JP
+vehicle snapshot. Remote control is not verified.
 
-Reverse-engineered from network captures of the official "Hyundai Bluelink"
-iOS app (bundle id com.hyundai.bluelink.jp) and its own web login bundle
-(served by the gateway itself at /web/v1/user/static/js/index.*.js), not
-from any private Hyundai documentation.
-
-Login is a three-step OAuth2 authorization-code dance, structurally the same
-family as this project's EU Hyundai/Kia/Genesis implementations:
-
-1. GET  {USER_API_URL}oauth2/authorize?response_type=code&client_id=...
-        -> sets a session cookie, redirects to the web login UI.
-2. POST {USER_API_URL}signin  {"email", "password", "mobileNum"}
-        (cookie from step 1 required)
-        -> {"redirectUrl": "...&code=..."} on success, or
-           {"step": N, ...} if an extra step (agreement/identity
-           verification) is required, or an error body with "errCode"
-           (confirmed: 4003 = wrong email/password, 4006 = account
-           temporarily locked after 5 failed attempts).
-3. POST {USER_API_URL}oauth2/token
-        grant_type=authorization_code&redirect_uri=...&code=...
-        Authorization: Basic base64(client_id:client_secret)
-        -> {"access_token", "refresh_token", "token_type", "expires_in"}
-
-Step 3's client_secret is deliberately NOT hardcoded here (see const.py).
-Pass it in via Home Assistant's config entry / secrets.yaml.
-
-Vehicle list/status/control endpoint *paths* below were read out of the
-gateway's own web bundle (so the paths themselves are public, served to any
-browser that loads the login page) and are believed correct, but no field
-in a status/vehicle-list response has actually been observed yet — nothing
-in this module beyond login has been exercised against a real account.
-Treat the parsing below as a first draft to adjust once real responses are
-seen, not as confirmed behavior.
+The OAuth client secret and any legacy CFB value are user-supplied. No
+application binary, credential, or signing key is distributed with this
+integration. See JP_BLUELINK.md for setup and validation steps.
 """
 
 import base64
@@ -43,9 +19,10 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from urllib.parse import parse_qs, urlparse
 
-from aiohttp import ClientSession
+from aiohttp import ClientError, ClientSession, ClientTimeout
 
 from .errors import AuthError, PINLockedError
+from .jp_status import normalize_status
 from .const import (
     JP_HYUNDAI_USER_API_URL,
     JP_HYUNDAI_SPA_API_URL,
@@ -93,6 +70,7 @@ class JpHyundai:
         pin: str | None = None,
         client_session: ClientSession | None = None,
         cfb: str | None = None,
+        stamp_url: str | None = None,
     ):
         """Initialize the JP Hyundai Bluelink API client.
 
@@ -124,6 +102,15 @@ class JpHyundai:
         # it unlocks the /spa/* device-identity flow (status + control). When
         # None, those stay disabled and degrade gracefully.
         self.cfb = cfb
+        self.stamp_url = stamp_url
+        if stamp_url:
+            parsed_url = urlparse(stamp_url)
+            if parsed_url.scheme not in ("http", "https") or not parsed_url.hostname or parsed_url.username:
+                raise ValueError("Stamp provider URL must be an HTTP(S) URL without embedded credentials")
+        self.status_diagnostics = {"state": "not_requested"}
+        self.last_status_response = None
+        self.vehicle_status_diagnostics = {}
+        self.vehicle_status_responses = {}
         if client_session is None:
             self.api_session = ClientSession(raise_for_status=False)
         else:
@@ -134,7 +121,7 @@ class JpHyundai:
 
     async def login(self):
         """Run the authorize -> signin -> token-exchange dance."""
-        _LOGGER.info("JP Hyundai login attempt for user: %s", self.username)
+        _LOGGER.info("JP Hyundai login attempt")
 
         # Step 1: GET oauth2/authorize to obtain the session cookie that
         # /signin needs. aiohttp's ClientSession keeps cookies automatically
@@ -191,11 +178,9 @@ class JpHyundai:
 
         # Step 3: exchange the authorization code for an access token.
         await self._exchange_code_for_token(authorization_code)
-        _LOGGER.info("JP Hyundai login succeeded for user: %s", self.username)
+        _LOGGER.info("JP Hyundai login succeeded")
 
     async def _exchange_code_for_token(self, authorization_code: str):
-        import base64
-
         basic = base64.b64encode(
             f"{JP_HYUNDAI_CLIENT_ID}:{self.client_secret}".encode()
         ).decode()
@@ -279,13 +264,14 @@ class JpHyundai:
             headers=self._auth_headers(),
         )
         body = await response.json()
-        _LOGGER.debug("JP Hyundai get_vehicles raw response: %s", body)
+        _LOGGER.debug("JP Hyundai received %d vehicles", len(body.get("cars", [])))
         self.vehicles = [
             {
                 "id": car.get("carId"),
                 "vin": car.get("vin"),
                 "VIN": car.get("vin"),
                 "nickName": car.get("carName") or car.get("vehicleName", ""),
+                "modelName": car.get("vehicleName") or car.get("carName", ""),
                 "carType": car.get("carType", ""),
                 "is_ev": car.get("carType") == "EV",
             }
@@ -293,39 +279,63 @@ class JpHyundai:
         ]
         return self.vehicles
 
-    # ------------------------------------------------------------------
-    # /spa/* device-identity flow (Stamp + device registration).
-    #
-    # Mirrors the upstream hyundai_kia_connect_api EU implementation, which
-    # this JP backend matches (same CCS platform, same ccsp-* headers and
-    # /spa/ structure seen in the app). The Stamp is
-    #   base64( XOR( cfb_bytes, f"{app_id}:{unix_seconds}" ) )
-    # with an app-embedded CFB key. The CFB value is user-supplied (never
-    # shipped); when absent, all of this is skipped and status/control
-    # degrade gracefully, preserving the "vehicle appears, no live data"
-    # behavior. UNVERIFIED end-to-end: not yet exercised against the real
-    # backend with a real CFB — see active_context.md and the probe
-    # scratchpad/jp_probe_spa_access.py.
-    # ------------------------------------------------------------------
+    # The local provider uses the official app's native signer. The older
+    # XOR/CFB implementation is kept as an optional compatibility path.
 
     @property
     def spa_enabled(self) -> bool:
-        """True if a CFB key was supplied, enabling the /spa/* flow."""
-        return bool(self.cfb)
+        """True if a Stamp service or legacy CFB key was configured."""
+        return bool(self.cfb or self.stamp_url)
 
     def _get_stamp(self, app_id: str) -> str:
-        cfb_bytes = base64.b64decode(self.cfb)
+        try:
+            cfb_bytes = base64.b64decode(self.cfb, validate=True)
+        except (TypeError, ValueError) as err:
+            raise ClientError("Invalid legacy CFB signing key") from err
+        if not cfb_bytes:
+            raise ClientError("Invalid legacy CFB signing key")
         raw = f"{app_id}:{int(time.time())}".encode()
         xored = bytes(b ^ cfb_bytes[i % len(cfb_bytes)] for i, b in enumerate(raw))
         return base64.b64encode(xored).decode()
 
-    def _spa_headers(self, app_id: str, device_id: str) -> dict:
+    async def _spa_headers(self, app_id: str, device_id: str) -> dict:
+        stamp = self._get_stamp(app_id) if not self.stamp_url else None
+        if self.stamp_url:
+            # Never forward account headers or cookies to the signing service.
+            # A short-lived isolated session also avoids absorbing its cookies
+            # into the account session. Redirects are deliberately rejected.
+            async with (
+                ClientSession(timeout=ClientTimeout(total=10)) as session,
+                session.get(self.stamp_url, allow_redirects=False) as response,
+            ):
+                if response.status != 200:
+                    raise ClientError("JP Stamp provider did not return HTTP 200")
+                try:
+                    body = await response.json()
+                except ValueError as err:
+                    raise ClientError("JP Stamp provider returned invalid JSON") from err
+            if not isinstance(body, dict):
+                raise ClientError("JP Stamp provider returned an invalid response")
+            app_id, stamp = body.get("app_id"), body.get("stamp")
+            if not isinstance(app_id, str) or not isinstance(stamp, str) or not 0 < len(stamp) <= 4096:
+                raise ClientError("JP Stamp provider returned invalid signing data")
+            try:
+                app_id = str(uuid.UUID(app_id))
+                decoded = base64.b64decode(stamp, validate=True)
+            except (TypeError, ValueError) as err:
+                raise ClientError("JP Stamp provider returned invalid signing data") from err
+            if not decoded:
+                raise ClientError("JP Stamp provider returned invalid signing data")
+            if self.spa_device_id and self.resolved_app_id != app_id:
+                self.spa_device_id = None
+                self.resolved_app_id = None
+                raise ClientError("JP Stamp provider changed application ID; registration will retry")
         return {
             "Authorization": self.access_token,
             "ccsp-service-id": JP_HYUNDAI_CLIENT_ID,
             "ccsp-application-id": app_id,
             "ccsp-device-id": device_id,
-            "Stamp": self._get_stamp(app_id),
+            "Stamp": stamp,
             "Accept": "application/json",
             "Content-Type": "application/json;charset=UTF-8",
             "User-Agent": USER_AGENT,
@@ -344,7 +354,8 @@ class JpHyundai:
             return True
         await self._ensure_token_valid()
 
-        for app_id in JP_HYUNDAI_APP_ID_CANDIDATES:
+        app_ids = ("",) if self.stamp_url else JP_HYUNDAI_APP_ID_CANDIDATES
+        for app_id in app_ids:
             device_id = str(uuid.uuid4())
             payload = {
                 "pushRegId": f"{uuid.uuid4().hex}{uuid.uuid4().hex}",
@@ -352,13 +363,21 @@ class JpHyundai:
                 "uuid": device_id,
             }
             try:
+                headers = await self._spa_headers(app_id, device_id)
+                # Registration precedes account authentication in the native
+                # app. An invalid/expired Bearer header rejects even a valid
+                # Stamp; neither account nor device credentials belong here.
+                headers.pop("Authorization", None)
+                headers.pop("ccsp-device-id", None)
                 resp = await self.api_session.post(
                     JP_HYUNDAI_SPA_API_URL + "notifications/register",
                     json=payload,
-                    headers=self._spa_headers(app_id, device_id),
+                    headers=headers,
                 )
-            except Exception as err:  # noqa: BLE001
-                _LOGGER.debug("JP device register error for app_id %s: %s", app_id, err)
+            except (ClientError, TimeoutError) as err:
+                if self.stamp_url:
+                    raise
+                _LOGGER.debug("JP device register failed: %s", type(err).__name__)
                 continue
             if resp.status not in range(200, 304):
                 _LOGGER.debug(
@@ -366,6 +385,8 @@ class JpHyundai:
                 )
                 continue
             body = await resp.json()
+            if body.get("retCode") not in (None, "S"):
+                continue
             resolved = (
                 (body.get("resMsg") or {}).get("deviceId")
                 if isinstance(body.get("resMsg"), dict)
@@ -373,7 +394,7 @@ class JpHyundai:
             )
             if resolved:
                 self.spa_device_id = resolved
-                self.resolved_app_id = app_id
+                self.resolved_app_id = headers["ccsp-application-id"]
                 _LOGGER.info("JP /spa/ device registered (app_id resolved)")
                 return True
         _LOGGER.warning(
@@ -383,21 +404,33 @@ class JpHyundai:
         )
         return False
 
+    def _record_fetch(self, vehicle_id: str, diagnostics: dict) -> None:
+        self.status_diagnostics = diagnostics
+        self.vehicle_status_diagnostics[vehicle_id] = diagnostics
+
     async def get_cached_vehicle_status(self, vehicle_id: str) -> dict:
         """Get vehicle status.
 
-        If a CFB key is configured, register a device and call the /spa/
-        status endpoint with the device-identity headers. Otherwise (or on
-        any failure) return {} so the Home Assistant integration still loads
-        and the vehicle appears as a device; status-derived entities just
-        report unknown. The empty dict is shaped for the shared coordinator,
-        which reads it with safely_get_json_value.
+        A Stamp service or legacy CFB key enables device registration and
+        cached snapshots. Missing signing data or a rejected response returns
+        an empty snapshot so identity and EV sensors can still be set up.
+        Diagnostics record the failure without exposing the raw body in logs.
         """
         await self._ensure_token_valid()
+        self.last_status_response = None
+        self.vehicle_status_responses.pop(vehicle_id, None)
 
         if not self.spa_enabled:
+            self._record_fetch(vehicle_id, {"state": "stamp_not_configured"})
             return {}
-        if not await self._ensure_device_registered():
+        try:
+            registered = await self._ensure_device_registered()
+        except (ClientError, TimeoutError):
+            self._record_fetch(vehicle_id, {"state": "stamp_provider_unavailable"})
+            _LOGGER.warning("JP Stamp provider unavailable; live status is unavailable")
+            return {}
+        if not registered:
+            self._record_fetch(vehicle_id, {"state": "device_registration_failed"})
             return {}
 
         # E-GMP vehicles (IONIQ 5/6 etc.) are "CCS2" and expose status at a
@@ -409,38 +442,46 @@ class JpHyundai:
         # Endpoint paths were read out of the app dex; the IONIQ 5 is CCS2.
         status_urls = (
             JP_HYUNDAI_SPA_API_URL + f"vehicles/{vehicle_id}/ccs2/carstatus/latest",
-            JP_HYUNDAI_SPA_API_URL_V2 + f"vehicles/{vehicle_id}/status",
+            JP_HYUNDAI_SPA_API_URL + f"vehicles/{vehicle_id}/status/latest",
         )
         response = None
         for url in status_urls:
-            response = await self.api_session.get(
-                url,
-                headers=self._spa_headers(self.resolved_app_id, self.spa_device_id),
-            )
+            try:
+                headers = await self._spa_headers(self.resolved_app_id, self.spa_device_id)
+            except (ClientError, TimeoutError):
+                self._record_fetch(vehicle_id, {"state": "stamp_provider_unavailable"})
+                return {}
+            headers["Ccuccs2protocolsupport"] = "1" if "/ccs2/" in url else "0"
+            response = await self.api_session.get(url, headers=headers)
             if response.status == 404:
                 _LOGGER.debug("JP status path 404, trying fallback: %s", url)
                 continue
             break
         if response is None or response.status not in range(200, 304):
+            self._record_fetch(vehicle_id, {
+                "state": "gateway_rejected" if response is not None and response.status == 403 else "http_error",
+                "http_status": None if response is None else response.status,
+            })
             _LOGGER.warning(
                 "JP Hyundai vehicle status request failed (%s); returning empty "
                 "status.", None if response is None else response.status
             )
             return {}
         body = await response.json()
-        # IMPORTANT: the real JP /spa/status structure has never been observed
-        # (the 403 blocked it until a CFB was supplied). The shared
-        # VehicleCoordinator reads US-BlueLink-shaped paths
-        # (lastVehicleInfo.vehicleStatusRpt.vehicleStatus...), which the JP
-        # body may NOT match — so entities can stay "unknown" even on a 200.
-        # This logs the raw body at INFO once so the real shape can be
-        # captured and the field mapping written. Remove/lower to DEBUG after
-        # the mapping exists. See active_context.md.
-        _LOGGER.info(
-            "JP Hyundai raw /spa/ status (capture this to build the field "
-            "mapping): %s", body
-        )
-        return body
+        self.last_status_response = body
+        self.vehicle_status_responses[vehicle_id] = body
+        if isinstance(body, dict) and body.get("retCode") not in (None, "S"):
+            self._record_fetch(vehicle_id, {"state": "api_error", "res_code": body.get("resCode")})
+            return {}
+        is_ev = any(car.get("id") == vehicle_id and car.get("is_ev")
+                    for car in self.vehicles or [])
+        result = normalize_status(body, is_ev=is_ev)
+        if result is None:
+            self._record_fetch(vehicle_id, {"state": "unsupported_response"})
+            _LOGGER.warning("JP vehicle status has an unsupported response structure")
+            return {}
+        self._record_fetch(vehicle_id, {"state": "ok"})
+        return result
 
     async def check_last_action_finished(self, vehicle_id: str) -> bool:
         """No remote commands are issued yet, so nothing is ever in flight."""
@@ -470,7 +511,7 @@ class JpHyundai:
             resp = await self.api_session.post(
                 url,
                 json=payload,
-                headers=self._spa_headers(self.resolved_app_id, self.spa_device_id),
+                headers=await self._spa_headers(self.resolved_app_id, self.spa_device_id),
             )
             if resp.status == 404:
                 _LOGGER.debug("JP door path 404, trying fallback: %s", url)

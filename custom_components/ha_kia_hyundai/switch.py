@@ -21,7 +21,7 @@ async def async_setup_entry(
 
     switches: list[SwitchEntity] = []
     for coordinator in coordinators.values():
-        if coordinator.is_ev:
+        if coordinator.can_remote_charge:
             switches.append(ChargingSwitch(coordinator=coordinator))
 
         if coordinator.can_remote_climate:

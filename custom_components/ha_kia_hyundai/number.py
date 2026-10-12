@@ -53,6 +53,8 @@ async def async_setup_entry(
 
     entities = []
     for coordinator in coordinators.values():
+        if not coordinator.can_set_charge_limits:
+            continue
         for description in NUMBER_DESCRIPTIONS:
             if getattr(coordinator, description.key, None) is not None:
                 entities.append(

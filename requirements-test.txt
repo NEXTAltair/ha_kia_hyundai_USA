@@ -1,0 +1,3 @@
+-r requirements.txt
+# Validated with Home Assistant 2025.1.4 on Python 3.12.
+pytest-homeassistant-custom-component==0.13.205

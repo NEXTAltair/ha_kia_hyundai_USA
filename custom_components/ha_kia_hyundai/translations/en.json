@@ -39,13 +39,14 @@
       },
       "jp_credentials": {
         "title": "Hyundai Japan (Bluelink)",
-        "description": "Enter your Hyundai Japan Bluelink account. The client secret is the app's OAuth secret you extracted yourself; the PIN is optional and only needed for future remote control.",
+        "description": "Enter your Hyundai Japan Bluelink account and OAuth client secret. A local Stamp service enables cached vehicle status. Remote controls are not yet verified.",
         "data": {
           "username": "Email",
           "password": "Password",
           "client_secret": "Client secret",
           "pin": "Remote control PIN (optional)",
-          "cfb": "CFB key (optional — enables live status/control)"
+          "cfb": "Legacy CFB key (optional)",
+          "stamp_url": "Stamp service URL (optional)"
         }
       }
     },
@@ -66,7 +67,8 @@
     "step": {
       "init": {
         "data": {
-          "scan_interval": "Scan Interval (minutes)"
+          "scan_interval": "Scan Interval (minutes)",
+          "stamp_url": "Stamp service URL (Japan only, optional)"
         }
       }
     }

@@ -36,6 +36,7 @@ from .const import (
     CONF_BRAND,
     CONF_CLIENT_SECRET,
     CONF_CFB,
+    CONF_STAMP_URL,
     CONF_DEVICE_ID,
     CONF_OTP_CODE,
     CONF_OTP_TYPE,
@@ -72,11 +73,16 @@ class KiaUvoOptionFlowHandler(OptionsFlow):
                 ): vol.All(vol.Coerce(int), vol.Range(min=1, max=999)),
             }
         )
+        if config_entry.data.get(CONF_BRAND) == BRAND_JP_HYUNDAI:
+            self.schema = self.schema.extend({
+                vol.Optional(CONF_STAMP_URL, default=config_entry.options.get(
+                    CONF_STAMP_URL, config_entry.data.get(CONF_STAMP_URL, "")
+                )): vol.Any("", vol.Url()),
+            })
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None):
         """Handle options flow."""
         if user_input is not None:
-            _LOGGER.debug("User input in option flow: %s", user_input)
             return self.async_create_entry(title="", data=user_input)
 
         return self.async_show_form(step_id="init", data_schema=self.schema)
@@ -350,6 +356,7 @@ class KiaUvoConfigFlowHandler(config_entries.ConfigFlow):
             vol.Required(CONF_PASSWORD): str,
             vol.Required(CONF_CLIENT_SECRET): str,
             vol.Optional(CONF_CFB, default=""): str,
+            vol.Optional(CONF_STAMP_URL, default=self.data.get(CONF_STAMP_URL, "")): str,
             vol.Optional(CONF_PIN, default=""): str,
         })
         errors: dict[str, str] = {}
@@ -359,6 +366,7 @@ class KiaUvoConfigFlowHandler(config_entries.ConfigFlow):
             password = user_input[CONF_PASSWORD]
             client_secret = user_input[CONF_CLIENT_SECRET]
             cfb = user_input.get(CONF_CFB) or None
+            stamp_url = user_input.get(CONF_STAMP_URL) or None
             pin = user_input.get(CONF_PIN) or None
 
             unique_id = f"{BRAND_JP_HYUNDAI}_{username.lower()}"
@@ -375,6 +383,7 @@ class KiaUvoConfigFlowHandler(config_entries.ConfigFlow):
                     pin=pin,
                     client_session=client_session,
                     cfb=cfb,
+                    stamp_url=stamp_url,
                 )
 
                 self.data.update({
@@ -382,6 +391,7 @@ class KiaUvoConfigFlowHandler(config_entries.ConfigFlow):
                     CONF_PASSWORD: password,
                     CONF_CLIENT_SECRET: client_secret,
                     CONF_CFB: cfb or "",
+                    CONF_STAMP_URL: stamp_url or "",
                     CONF_PIN: pin or "",
                     CONF_BRAND: BRAND_JP_HYUNDAI,
                 })
@@ -563,6 +573,7 @@ class KiaUvoConfigFlowHandler(config_entries.ConfigFlow):
             elif brand == BRAND_JP_HYUNDAI:
                 entry_data[CONF_CLIENT_SECRET] = self.data.get(CONF_CLIENT_SECRET)
                 entry_data[CONF_CFB] = self.data.get(CONF_CFB, "")
+                entry_data[CONF_STAMP_URL] = self.data.get(CONF_STAMP_URL, "")
                 entry_data[CONF_PIN] = self.data.get(CONF_PIN)
             else:  # Hyundai or Genesis (USA)
                 entry_data[CONF_PIN] = self.data.get(CONF_PIN)

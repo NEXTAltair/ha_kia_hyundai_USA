@@ -24,6 +24,7 @@ from homeassistant.helpers.restore_state import RestoreEntity
 
 from . import VehicleCoordinator, get_all_coordinators
 from .const import SEAT_STATUS
+from .kia_hyundai_api import JpHyundai
 from .vehicle_coordinator_base_entity import VehicleCoordinatorBaseEntity
 
 _LOGGER = getLogger(__name__)
@@ -224,7 +225,9 @@ class InstrumentSensor(VehicleCoordinatorBaseEntity, SensorEntity, RestoreEntity
     @property
     def native_value(self):
         value = getattr(self.coordinator, self.entity_description.key)
-        if value is not None and value != 0:
+        # JP normalization represents missing readings with None, so zero is
+        # a reported value (e.g. empty EV battery or zero remaining range).
+        if value is not None and (value != 0 or isinstance(self.coordinator.api_connection, JpHyundai)):
             self._attr_native_value = value
         return self._attr_native_value
 
