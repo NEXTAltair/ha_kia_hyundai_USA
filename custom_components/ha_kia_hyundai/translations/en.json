@@ -39,14 +39,14 @@
       },
       "jp_credentials": {
         "title": "Hyundai Japan (Bluelink)",
-        "description": "Enter your Hyundai Japan Bluelink account and OAuth client secret. A local Stamp service enables cached vehicle status. Remote controls are not yet verified.",
+        "description": "Enter your Hyundai Japan Bluelink account and OAuth client secret. CFB signing data enables cached vehicle status without an external Stamp service. Remote controls are not yet verified.",
         "data": {
           "username": "Email",
           "password": "Password",
           "client_secret": "Client secret",
           "pin": "Remote control PIN (optional)",
-          "cfb": "Legacy CFB key (optional)",
-          "stamp_url": "Stamp service URL (optional)"
+          "cfb": "CFB signing data (for vehicle status)",
+          "stamp_url": "Stamp service URL (legacy fallback, optional)"
         }
       }
     },
@@ -54,7 +54,8 @@
       "auth": "Authentication failed. Check your credentials.",
       "invalid_otp": "Invalid OTP code. Please try again.",
       "invalid_pin": "PIN must be exactly 4 digits.",
-      "unknown": "Unknown error occurred."
+      "unknown": "Unknown error occurred.",
+      "invalid_cfb": "Invalid signing data. Enter the Base64 cfb value from the JP setup file."
     },
     "abort": {
       "already_configured": "This account is already configured.",
@@ -68,9 +69,14 @@
       "init": {
         "data": {
           "scan_interval": "Scan Interval (minutes)",
-          "stamp_url": "Stamp service URL (Japan only, optional)"
-        }
+          "stamp_url": "Stamp service URL (legacy fallback, optional)",
+          "cfb": "CFB signing data (Japan only)"
+        },
+        "description": "For Japan, enter CFB signing data to generate Stamps in Home Assistant. A Stamp service URL is unnecessary when CFB is configured."
       }
+    },
+    "error": {
+      "invalid_cfb": "Invalid signing data. Enter the Base64 cfb value from the JP setup file."
     }
   }
 }

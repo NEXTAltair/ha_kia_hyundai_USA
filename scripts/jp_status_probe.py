@@ -57,12 +57,16 @@ def redact(value):
 
 
 async def probe(args):
+    cfb = None
+    if args.cfb_file:
+        config = json.loads(args.cfb_file.read_text(encoding="utf-8"))
+        cfb = config["cfb"]
     username = os.environ.get("JP_BLUELINK_USERNAME") or input("Bluelink email: ")
     password = os.environ.get("JP_BLUELINK_PASSWORD") or getpass("Bluelink password: ")
     secret = os.environ.get("JP_BLUELINK_CLIENT_SECRET") or getpass(
         "OAuth client secret: "
     )
-    api = JpHyundai(username, password, secret, stamp_url=args.stamp_url)
+    api = JpHyundai(username, password, secret, cfb=cfb, stamp_url=args.stamp_url)
     try:
         await api.login()
         vehicles = await api.get_vehicles()
@@ -97,7 +101,9 @@ async def probe(args):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--stamp-url", default="http://127.0.0.1:8765/stamp")
+    signing = parser.add_mutually_exclusive_group(required=True)
+    signing.add_argument("--cfb-file", type=Path, help="Private JSON file from jp_stamp_setup.py")
+    signing.add_argument("--stamp-url", help="Optional legacy external Stamp service")
     parser.add_argument(
         "--output", type=Path, default=Path("/tmp/jp-status.redacted.json")
     )

@@ -1,5 +1,6 @@
 """Verify JP entities, configuration and diagnostics in Home Assistant."""
 
+import base64
 import json
 from unittest.mock import patch
 
@@ -14,6 +15,7 @@ from custom_components.ha_kia_hyundai.const import (
     BRAND_JP_HYUNDAI,
     CONF_BRAND,
     CONF_CLIENT_SECRET,
+    CONF_CFB,
     CONF_STAMP_URL,
 )
 from custom_components.ha_kia_hyundai import get_coordinator
@@ -22,6 +24,8 @@ from custom_components.ha_kia_hyundai.diagnostics import (
 )
 from custom_components.ha_kia_hyundai.kia_hyundai_api.jp_hyundai import JpHyundai
 from custom_components.ha_kia_hyundai.kia_hyundai_api.jp_status import normalize_status
+
+CFB = base64.b64encode(bytes(range(47))).decode()
 
 
 @pytest.fixture(autouse=True)
@@ -35,8 +39,9 @@ def custom_integrations(enable_custom_integrations, monkeypatch):
     yield
 
 
-@pytest.mark.parametrize("with_stamp", [False, True])
-async def test_jp_flow_entities_and_stamp_options(hass, ccs2_body, with_stamp):
+@pytest.mark.parametrize("signing", [None, "provider", "local"])
+async def test_jp_flow_entities_and_stamp_options(hass, ccs2_body, signing):
+    with_stamp = signing is not None
     async def login(client):
         client.access_token = "Bearer test-token"
 
@@ -52,7 +57,7 @@ async def test_jp_flow_entities_and_stamp_options(hass, ccs2_body, with_stamp):
         return client.vehicles
 
     async def status(client, vehicle_id):
-        if client.stamp_url:
+        if client.spa_enabled:
             return normalize_status(ccs2_body, is_ev=True)
         return {}
 
@@ -73,8 +78,10 @@ async def test_jp_flow_entities_and_stamp_options(hass, ccs2_body, with_stamp):
             "password": "test-password",
             CONF_CLIENT_SECRET: "test-secret",
         }
-        if with_stamp:
+        if signing == "provider":
             credentials[CONF_STAMP_URL] = "http://127.0.0.1:8765/stamp"
+        elif signing == "local":
+            credentials[CONF_CFB] = CFB
         result = await hass.config_entries.flow.async_configure(
             result["flow_id"], credentials
         )
@@ -147,6 +154,7 @@ async def test_jp_flow_entities_and_stamp_options(hass, ccs2_body, with_stamp):
         assert "test-secret" not in serialized
         assert "test-password" not in serialized
         assert "test@example.invalid" not in serialized
+        assert CFB not in serialized
         assert all(value not in serialized for value in sensitive_fields.values())
         raw = diagnostics["vehicles"]["test-car"]["jp_status_response"]
         assert raw["retCode"] == "S"
@@ -183,22 +191,33 @@ async def test_jp_flow_entities_and_stamp_options(hass, ccs2_body, with_stamp):
         await hass.async_block_till_done()
         assert entry.data["password"] == "updated-password"
         assert entry.data[CONF_STAMP_URL] == (
-            "http://127.0.0.1:8765/stamp" if with_stamp else ""
+            "http://127.0.0.1:8765/stamp" if signing == "provider" else ""
         )
+        assert entry.data[CONF_CFB] == (CFB if signing == "local" else "")
         assert entry.state == ConfigEntryState.LOADED
         assert hass.states.get(battery.entity_id).state == (
             "73" if with_stamp else "unavailable"
         )
-        # Existing identity-only entries can add a signer through Options,
+        # Existing entries can add local signing through Options,
         # without deleting the account or entering its credentials again.
         options = await hass.config_entries.options.async_init(entry.entry_id)
+        invalid = await hass.config_entries.options.async_configure(
+            options["flow_id"], {CONF_CFB: "not base64"}
+        )
+        assert invalid["type"] == FlowResultType.FORM
+        assert invalid["errors"] == {CONF_CFB: "invalid_cfb"}
         options = await hass.config_entries.options.async_configure(
-            options["flow_id"], {CONF_STAMP_URL: "http://127.0.0.1:8765/stamp"}
+            options["flow_id"], {CONF_CFB: CFB, CONF_STAMP_URL: ""}
         )
         assert options["type"] == FlowResultType.CREATE_ENTRY
         await hass.async_block_till_done()
         assert entry.state == ConfigEntryState.LOADED
         assert hass.states.get(battery.entity_id).state == "73"
+        client = get_coordinator(hass, "test-car").api_connection
+        assert client.cfb == CFB
+        assert client.stamp_url is None
+        diagnostics = await async_get_config_entry_diagnostics(hass, entry)
+        assert CFB not in json.dumps(diagnostics, default=str)
         ccs2_body["resMsg"]["state"]["Vehicle"]["Green"]["BatteryManagement"][
             "BatteryRemain"
         ]["Ratio"] = 0

@@ -30,3 +30,6 @@ secrets.yaml
 # Added by Snap Cursor Rules extension
 .cursor/rules/remote
 kia_uvo
+
+# Local diagnostics and provisioned JP signing data
+local-private/

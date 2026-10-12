@@ -272,7 +272,7 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry):
     refresh_token = config_entry.data.get(CONF_REFRESH_TOKEN)
     pin = config_entry.data.get(CONF_PIN)
     client_secret = config_entry.data.get(CONF_CLIENT_SECRET)
-    cfb = config_entry.data.get(CONF_CFB) or None
+    cfb = config_entry.options.get(CONF_CFB, config_entry.data.get(CONF_CFB)) or None
     stamp_url = config_entry.options.get(CONF_STAMP_URL, config_entry.data.get(CONF_STAMP_URL)) or None
     vehicles_config = config_entry.data.get(CONF_VEHICLES, [])
 

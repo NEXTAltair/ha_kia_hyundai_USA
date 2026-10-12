@@ -25,6 +25,7 @@ async def api_server(monkeypatch, ccs2_body, socket_enabled):
         "status_devices": [],
         "status_bodies": [],
         "provider_code_after_status": None,
+        "expected_stamp": None,
     }
 
     async def stamp(request):
@@ -40,6 +41,8 @@ async def api_server(monkeypatch, ccs2_body, socket_enabled):
         assert "Authorization" not in request.headers
         assert "ccsp-device-id" not in request.headers
         assert request.headers["ccsp-application-id"] == APP_ID
+        if state["expected_stamp"] is not None:
+            assert request.headers["Stamp"] == state["expected_stamp"]
         state["calls"].append("register")
         if state["register_code"] != 200:
             return web.json_response(
@@ -52,6 +55,8 @@ async def api_server(monkeypatch, ccs2_body, socket_enabled):
     async def status(request):
         assert request.headers["Authorization"] == "Bearer test-token"
         assert request.headers["ccsp-device-id"] == state["registered_devices"][-1]
+        if state["expected_stamp"] is not None:
+            assert request.headers["Stamp"] == state["expected_stamp"]
         state["status_devices"].append(request.headers["ccsp-device-id"])
         state["calls"].append(request.path)
         code = state["status_code"] if "/ccs2/" in request.path else 200
@@ -94,6 +99,30 @@ async def test_native_provider_and_registration_cache(api_server):
     await client.get_cached_vehicle_status("test-car")
     assert state["calls"].count("register") == 1
     assert state["calls"].count("stamp") == 3
+
+
+@pytest.mark.parametrize("keep_provider", [False, True])
+async def test_local_signing_works_without_external_provider(api_server, monkeypatch, keep_provider):
+    client, state = api_server
+    client.cfb = base64.b64encode(bytes(47)).decode()
+    if not keep_provider:
+        client.stamp_url = None
+    # A configured but unavailable provider must never be consulted.
+    state["provider_code"] = 503
+    monkeypatch.setattr(jp.time, "time", lambda: 1700000000)
+    state["expected_stamp"] = base64.b64encode(f"{APP_ID}:1700000000".encode()).decode()
+    for _ in range(2):
+        assert await client.get_cached_vehicle_status("test-car")
+        assert client.status_diagnostics == {"state": "ok"}
+    assert "stamp" not in state["calls"]
+    assert state["calls"].count("register") == 1
+    assert client.resolved_app_id == APP_ID
+
+
+@pytest.mark.parametrize("value", ["not base64", base64.b64encode(bytes(46)).decode(), base64.b64encode(bytes(48)).decode()])
+def test_invalid_local_signing_data_is_rejected(value):
+    with pytest.raises(ValueError):
+        jp.validate_cfb(value)
 
 
 @pytest.mark.parametrize("code, legacy", [(404, True), (403, False), (500, False)])
